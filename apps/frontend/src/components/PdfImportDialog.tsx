@@ -26,6 +26,13 @@ import {
   FindInPage as ExtractIcon,
 } from '@mui/icons-material';
 
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+}
+
 interface PdfImportDialogProps {
   open: boolean;
   onClose: () => void;
@@ -63,15 +70,35 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
     }
   };
 
-  const parsePdfFile = (file: File) => {
+  const parsePdfFile = async (file: File) => {
     setParsing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const rawText = (event.target?.result as string) || '';
-      setPdfTextContent(rawText);
-      extractLeadsFromText(rawText, file.name);
-    };
-    reader.readAsText(file);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdfDoc = await loadingTask.promise;
+      let fullText = '';
+
+      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str)
+          .join(' ');
+        fullText += pageText + '\n';
+      }
+
+      setPdfTextContent(fullText);
+      extractLeadsFromText(fullText, file.name);
+    } catch (err) {
+      console.warn('PDF.js binary stream parse failed, attempting raw reader:', err);
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const rawText = (event.target?.result as string) || '';
+        setPdfTextContent(rawText);
+        extractLeadsFromText(rawText, file.name);
+      };
+      reader.readAsText(file);
+    }
   };
 
   const extractLeadsFromText = (text: string, filename: string) => {
