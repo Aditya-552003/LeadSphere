@@ -82,11 +82,21 @@ export const WorkspaceLayout: React.FC = () => {
   const userObj = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')!) : null;
   const tenantObj = localStorage.getItem('tenant') ? JSON.parse(localStorage.getItem('tenant')!) : null;
 
-  const userName = userObj?.name || 'Alex Vance';
+  const userEmail = userObj?.email || '';
+  const emailPrefix = userEmail.split('@')[0] || 'User';
+  const userName =
+    userObj?.name && userObj.name !== 'Alex Vance'
+      ? userObj.name
+      : emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+
   const userAvatar = userObj?.avatar || null;
-  const userInitial = userName.trim()[0]?.toUpperCase() || 'A';
+  const userInitial = userName.trim()[0]?.toUpperCase() || 'U';
   const userRole = userObj?.role || 'Company Admin';
-  const tenantName = tenantObj?.name || 'Apex Digital';
+
+  const tenantName =
+    tenantObj?.name && tenantObj.name !== 'Apex Digital Corp' && tenantObj.name !== 'Apex Digital'
+      ? tenantObj.name
+      : `${userEmail.split('@')[1]?.split('.')[0]?.toUpperCase() || 'WORKSPACE'} Corp`;
 
   useEffect(() => {
     if (userRole === 'Super Admin' && (location.pathname === '/dashboard' || location.pathname === '/')) {

@@ -85,14 +85,33 @@ export const LoginPage: React.FC = () => {
         );
         navigate('/dashboard');
       } else {
-        const comp = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'Apex Digital';
+        // Look up registered tenant details from localStorage
+        let foundAdminName = '';
+        let foundTenantName = '';
+        try {
+          const storedTenants = localStorage.getItem('registered_tenants');
+          if (storedTenants) {
+            const list = JSON.parse(storedTenants);
+            const match = list.find((t: any) => t.adminEmail?.toLowerCase() === email.toLowerCase());
+            if (match) {
+              foundAdminName = match.adminName;
+              foundTenantName = match.name;
+            }
+          }
+        } catch (e) {}
+
+        const emailPrefix = email.split('@')[0] || 'User';
+        const computedName = foundAdminName || (emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1));
+        const companyDomain = email.split('@')[1]?.split('.')[0]?.toUpperCase() || 'WORKSPACE';
+        const computedTenantName = foundTenantName || `${companyDomain} Corp`;
+
         localStorage.setItem(
           'tenant',
-          JSON.stringify({ id: 'tn_apex', name: `${comp} Corp`, slug: 'apex-digital' }),
+          JSON.stringify({ id: `tn_${companyDomain.toLowerCase()}`, name: computedTenantName, slug: companyDomain.toLowerCase() }),
         );
         localStorage.setItem(
           'user',
-          JSON.stringify({ name: 'Alex Vance', email, role: 'Company Admin' }),
+          JSON.stringify({ name: computedName, email, role: 'Company Admin' }),
         );
         navigate('/dashboard');
       }

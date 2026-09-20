@@ -47,8 +47,32 @@ export const UserProfileDialog: React.FC<UserProfileDialogProps> = ({
   const user = rawUser ? JSON.parse(rawUser) : null;
   const tenant = rawTenant ? JSON.parse(rawTenant) : null;
 
-  const userName = user?.name || 'Workspace User';
   const userEmail = user?.email || 'user@company.com';
+  
+  // Resolve correct name from registered_tenants or email prefix
+  let resolvedName = user?.name;
+  if (!resolvedName || resolvedName === 'Alex Vance') {
+    try {
+      const storedTenants = localStorage.getItem('registered_tenants');
+      if (storedTenants) {
+        const list = JSON.parse(storedTenants);
+        const match = list.find((t: any) => t.adminEmail?.toLowerCase() === userEmail.toLowerCase());
+        if (match?.adminName) resolvedName = match.adminName;
+      }
+    } catch (e) {}
+
+    if (!resolvedName || resolvedName === 'Alex Vance') {
+      const prefix = userEmail.split('@')[0] || 'User';
+      resolvedName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+    }
+
+    // Auto-update local storage user object if it was holding dummy 'Alex Vance'
+    if (user && user.name !== resolvedName) {
+      localStorage.setItem('user', JSON.stringify({ ...user, name: resolvedName }));
+    }
+  }
+
+  const userName = resolvedName;
   const userRole = user?.role || 'Company Admin';
   const userPhone = user?.phone || 'Not Provided';
   const userId = user?.id || `usr_${userName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
