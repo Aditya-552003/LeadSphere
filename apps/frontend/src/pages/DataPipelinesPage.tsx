@@ -4,8 +4,6 @@ import {
   Typography,
   Button,
   Grid,
-  Card,
-  CardContent,
   Chip,
   Paper,
   Table,
@@ -15,19 +13,18 @@ import {
   TableCell,
   CircularProgress,
   IconButton,
-  Tooltip,
   Stack,
-  Divider,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
   CloudDownload as DownloadIcon,
   Storage as PipelineIcon,
-  CheckCircle as SuccessIcon,
-  Error as ErrorIcon,
   Refresh as RefreshIcon,
+  PictureAsPdf as PdfIcon,
+  UploadFile as PdfUploadIcon,
 } from '@mui/icons-material';
 import { ImportWizardDialog } from '../components/ImportWizardDialog';
+import { PdfImportDialog } from '../components/PdfImportDialog';
 
 interface ImportJobRecord {
   id: string;
@@ -54,6 +51,7 @@ export const DataPipelinesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [isPdfWizardOpen, setIsPdfWizardOpen] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -65,15 +63,38 @@ export const DataPipelinesPage: React.FC = () => {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
 
-      // Fetch import history
-      const importRes = await fetch('/api/v1/data/imports', { headers });
-      const importData = await importRes.json();
-      setImportJobs(importData.data || []);
+      // Fetch CSV import history from backend
+      let csvImports: ImportJobRecord[] = [];
+      try {
+        const importRes = await fetch('/api/v1/data/imports', { headers });
+        const importData = await importRes.json();
+        csvImports = importData.data || [];
+      } catch (e) {}
+
+      // Fetch PDF import history from local storage
+      let pdfImports: ImportJobRecord[] = [];
+      try {
+        const p = localStorage.getItem('pdf_import_jobs');
+        if (p) pdfImports = JSON.parse(p);
+      } catch (e) {}
+
+      setImportJobs([...pdfImports, ...csvImports]);
 
       // Fetch export history
-      const exportRes = await fetch('/api/v1/data/exports', { headers });
-      const exportData = await exportRes.json();
-      setExportJobs(exportData.data || []);
+      let csvExports: ExportJobRecord[] = [];
+      try {
+        const exportRes = await fetch('/api/v1/data/exports', { headers });
+        const exportData = await exportRes.json();
+        csvExports = exportData.data || [];
+      } catch (e) {}
+
+      let pdfExports: ExportJobRecord[] = [];
+      try {
+        const p = localStorage.getItem('pdf_export_jobs');
+        if (p) pdfExports = JSON.parse(p);
+      } catch (e) {}
+
+      setExportJobs([...pdfExports, ...csvExports]);
     } catch (err) {
       console.error('Failed to fetch data pipeline history:', err);
     } finally {
@@ -100,6 +121,127 @@ export const DataPipelinesPage: React.FC = () => {
       fetchJobs();
     } catch (err) {
       console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    setExporting(true);
+    try {
+      let tId = 'default';
+      try {
+        const storedTenant = localStorage.getItem('tenant');
+        if (storedTenant) {
+          const parsed = JSON.parse(storedTenant);
+          tId = parsed.id || parsed.slug || 'default';
+        }
+      } catch (e) {}
+
+      const key = `leads_${tId}`;
+      let leads: any[] = [];
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) leads = JSON.parse(stored);
+      } catch (e) {}
+
+      // Generate formatted PDF printable report stream
+      const reportWindow = window.open('', '_blank');
+      if (reportWindow) {
+        const dateStr = new Date().toLocaleDateString();
+        const html = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>LeadSphere Workspace Lead Report - ${dateStr}</title>
+              <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1e293b; }
+                .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2563eb; padding-bottom: 15px; margin-bottom: 30px; }
+                .title { font-size: 24px; font-weight: bold; color: #1e293b; }
+                .subtitle { font-size: 13px; color: #64748b; margin-top: 4px; }
+                .badge { background-color: #e0e7ff; color: #3730a3; padding: 6px 12px; border-radius: 20px; font-weight: 600; font-size: 12px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th { background-color: #f8fafc; color: #475569; text-align: left; padding: 10px; font-size: 12px; font-weight: 700; border-bottom: 1px solid #e2e8f0; }
+                td { padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+                .amount { font-weight: 700; color: #16a34a; }
+                .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <div>
+                  <div class="title">LeadSphere Lead Pipeline Dataset Report</div>
+                  <div class="subtitle">Generated on ${dateStr} • Total Leads: ${leads.length}</div>
+                </div>
+                <div class="badge">CONFIDENTIAL TENANT DATA</div>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Lead Name</th>
+                    <th>Company</th>
+                    <th>Contact Email</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Deal Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    leads.length === 0
+                      ? '<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;">No lead records found in active workspace dataset.</td></tr>'
+                      : leads
+                          .map(
+                            (l, i) => `
+                        <tr>
+                          <td>${i + 1}</td>
+                          <td><strong>${l.full_name || `${l.first_name || ''} ${l.last_name || ''}` || 'N/A'}</strong></td>
+                          <td>${l.company_name || 'N/A'}</td>
+                          <td>${l.email || 'N/A'}</td>
+                          <td>${l.phone || 'N/A'}</td>
+                          <td>${l.status || 'New'}</td>
+                          <td class="amount">$${Number(l.estimated_value || 0).toLocaleString()}</td>
+                        </tr>
+                      `
+                          )
+                          .join('')
+                  }
+                </tbody>
+              </table>
+              <div class="footer">
+                LeadSphere Multi-Tenant Enterprise SaaS • Automatic PDF Export Pipeline
+              </div>
+              <script>
+                window.onload = function() { window.print(); };
+              </script>
+            </body>
+          </html>
+        `;
+        reportWindow.document.write(html);
+        reportWindow.document.close();
+      }
+
+      // Record PDF export in history
+      const historyKey = 'pdf_export_jobs';
+      let history: any[] = [];
+      try {
+        const h = localStorage.getItem(historyKey);
+        if (h) history = JSON.parse(h);
+      } catch (e) {}
+
+      const jobRecord = {
+        id: `pdf_exp_${Date.now()}`,
+        format: 'pdf',
+        total_records: leads.length,
+        status: 'completed',
+        created_at: new Date().toISOString(),
+      };
+      localStorage.setItem(historyKey, JSON.stringify([jobRecord, ...history]));
+
+      fetchJobs();
+    } catch (err) {
+      console.error('PDF Export failed:', err);
     } finally {
       setExporting(false);
     }
@@ -132,11 +274,11 @@ export const DataPipelinesPage: React.FC = () => {
             <PipelineIcon color="primary" fontSize="large" /> Data Pipelines & Import/Export Center
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Execute high-performance CSV streaming imports, configure deduplication rules, and export tenant lead datasets with formula injection defense.
+            Execute high-performance CSV & PDF streaming imports, configure deduplication rules, and export lead datasets in CSV or PDF format.
           </Typography>
         </Box>
 
-        <Stack direction="row" spacing={2} alignItems="center">
+        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
           <IconButton onClick={fetchJobs} title="Refresh jobs history">
             <RefreshIcon />
           </IconButton>
@@ -148,7 +290,18 @@ export const DataPipelinesPage: React.FC = () => {
             disabled={exporting}
             sx={{ py: 1 }}
           >
-            Export Leads (CSV)
+            Export CSV
+          </Button>
+
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<PdfIcon />}
+            onClick={handleExportPdf}
+            disabled={exporting}
+            sx={{ py: 1 }}
+          >
+            Export PDF
           </Button>
 
           <Button
@@ -159,8 +312,20 @@ export const DataPipelinesPage: React.FC = () => {
           >
             Import CSV Leads
           </Button>
+
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={<PdfUploadIcon />}
+            onClick={() => setIsPdfWizardOpen(true)}
+            sx={{ py: 1 }}
+          >
+            Import PDF Leads
+          </Button>
         </Stack>
       </Box>
+
+
 
       {/* Metrics Row */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -198,7 +363,7 @@ export const DataPipelinesPage: React.FC = () => {
 
       {/* Import History Table */}
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-        Recent CSV Import Pipeline History
+        Recent Import Pipeline History (CSV & PDF)
       </Typography>
 
       <Paper variant="outlined" sx={{ mb: 5, borderRadius: 2 }}>
@@ -208,7 +373,7 @@ export const DataPipelinesPage: React.FC = () => {
           </Box>
         ) : importJobs.length === 0 ? (
           <Box sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>
-            <Typography variant="body2">No CSV import jobs executed yet.</Typography>
+            <Typography variant="body2">No import jobs executed yet.</Typography>
           </Box>
         ) : (
           <Table>
@@ -227,7 +392,10 @@ export const DataPipelinesPage: React.FC = () => {
             <TableBody>
               {importJobs.map((job) => (
                 <TableRow key={job.id}>
-                  <TableCell sx={{ fontWeight: 600 }}>{job.filename}</TableCell>
+                  <TableCell sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {job.filename.toLowerCase().endsWith('.pdf') ? <PdfIcon color="error" fontSize="small" /> : <UploadIcon color="primary" fontSize="small" />}
+                    {job.filename}
+                  </TableCell>
                   <TableCell>{job.total_rows}</TableCell>
                   <TableCell sx={{ color: 'success.main', fontWeight: 700 }}>{job.successful_rows}</TableCell>
                   <TableCell sx={{ color: 'warning.main', fontWeight: 600 }}>{job.duplicate_rows}</TableCell>
@@ -264,7 +432,7 @@ export const DataPipelinesPage: React.FC = () => {
 
       {/* Export History Table */}
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-        Export Pipeline History
+        Export Pipeline History (CSV & PDF)
       </Typography>
 
       <Paper variant="outlined" sx={{ borderRadius: 2 }}>
@@ -287,7 +455,15 @@ export const DataPipelinesPage: React.FC = () => {
               {exportJobs.map((job) => (
                 <TableRow key={job.id}>
                   <TableCell sx={{ fontWeight: 600 }}>{job.id.substring(0, 8)}...</TableCell>
-                  <TableCell sx={{ textTransform: 'uppercase' }}>{job.format}</TableCell>
+                  <TableCell sx={{ textTransform: 'uppercase', fontWeight: 700 }}>
+                    <Chip
+                      label={job.format.toUpperCase()}
+                      size="small"
+                      color={job.format === 'pdf' ? 'error' : 'primary'}
+                      variant="outlined"
+                      sx={{ fontWeight: 700 }}
+                    />
+                  </TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>{job.total_records}</TableCell>
                   <TableCell>
                     <Chip label={job.status.toUpperCase()} color="success" size="small" sx={{ fontWeight: 700 }} />
@@ -300,12 +476,20 @@ export const DataPipelinesPage: React.FC = () => {
         )}
       </Paper>
 
-      {/* Multi-step Import Wizard */}
+      {/* Multi-step CSV Import Wizard */}
       <ImportWizardDialog
         open={isWizardOpen}
         onClose={() => setIsWizardOpen(false)}
         onImportCompleted={fetchJobs}
       />
+
+      {/* PDF Import Wizard */}
+      <PdfImportDialog
+        open={isPdfWizardOpen}
+        onClose={() => setIsPdfWizardOpen(false)}
+        onImportCompleted={fetchJobs}
+      />
     </Box>
   );
 };
+

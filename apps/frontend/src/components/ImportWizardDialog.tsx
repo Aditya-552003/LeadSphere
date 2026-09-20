@@ -162,8 +162,8 @@ export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
 
   return (
     <Dialog open={open} onClose={handleReset} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>
-        Multi-Tenant Lead Data Import Wizard
+      <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
+        <UploadIcon color="primary" /> Multi-Tenant Lead Data Import Wizard (CSV)
       </DialogTitle>
 
       <Box sx={{ px: 3, pt: 1, pb: 2 }}>
@@ -178,30 +178,72 @@ export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
 
       <Divider />
 
-      <DialogContent sx={{ minHeight: 340, py: 3 }}>
+      <DialogContent sx={{ py: 2.5 }}>
         {/* Step 0: Upload / Paste CSV */}
         {activeStep === 0 && (
-          <Box>
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Paste your raw CSV text below or upload a file. The first line must contain column names.
+          <Box sx={{ width: '100%' }}>
+            <Alert severity="info" sx={{ mb: 2.5 }}>
+              Browse and upload a CSV file from your computer, or paste raw CSV text below. The first line must contain column headers.
             </Alert>
-            <TextField
-              fullWidth
-              label="CSV File Name"
-              size="small"
-              value={filename}
-              onChange={(e) => setFilename(e.target.value)}
-              sx={{ mb: 2 }}
-            />
+
+            {/* File Browse / Dropzone Paper */}
+            <Paper
+              variant="outlined"
+              component="label"
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justify: 'center',
+                border: '2px dashed #1976d2',
+                borderRadius: 2,
+                p: 3,
+                textAlign: 'center',
+                bgcolor: 'action.hover',
+                cursor: 'pointer',
+                mb: 2.5,
+                width: '100%',
+                boxSizing: 'border-box',
+                transition: 'all 0.2s ease',
+                '&:hover': { bgcolor: 'action.selected', borderColor: '#115293' },
+              }}
+            >
+              <input
+                type="file"
+                accept=".csv,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    const file = e.target.files[0];
+                    setFilename(file.name);
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                      const text = (evt.target?.result as string) || '';
+                      setCsvContent(text);
+                    };
+                    reader.readAsText(file);
+                  }
+                }}
+              />
+              <UploadIcon color="primary" sx={{ fontSize: 44, mb: 1 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                {filename ? filename : 'Click to select or drop CSV lead file'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Supports CSV lead rosters, contact cards, and exported summaries
+              </Typography>
+            </Paper>
+
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+              Or Paste Raw CSV Document Content
+            </Typography>
             <TextField
               fullWidth
               multiline
-              rows={8}
-              label="CSV Data Content"
+              rows={3}
+              placeholder="Paste raw text copied from CSV file..."
               value={csvContent}
               onChange={(e) => setCsvContent(e.target.value)}
-              placeholder="Header1,Header2..."
-              variant="outlined"
             />
           </Box>
         )}
