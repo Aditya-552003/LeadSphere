@@ -1,0 +1,20 @@
+{
+  "name": "leadsphere",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-Tenant Lead Management & Outreach Portal",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:backend": "npm --prefix apps/backend run start:dev",
+    "dev:frontend": "npm --prefix apps/frontend run dev",
+    "build:backend": "npm --prefix apps/backend run build",
+    "build:frontend": "npm --prefix apps/frontend run build",
+    "test:backend": "npm --prefix apps/backend run test",
+    "test:frontend": "npm --prefix apps/frontend run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
