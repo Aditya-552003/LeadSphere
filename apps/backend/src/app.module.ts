@@ -63,52 +63,72 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
-      useFactory: () => ({
-        type: 'postgres',
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT || '5432', 10),
-        username: process.env.DB_USERNAME || 'postgres',
-        password: process.env.DB_PASSWORD || 'postgres',
-        database: process.env.DB_DATABASE || 'leadsphere',
-        entities: [
-          Tenant,
-          User,
-          Membership,
-          Invitation,
-          Session,
-          Role,
-          Permission,
-          RolePermission,
-          Group,
-          GroupMember,
-          PermissionOverride,
-          AuditLog,
-          Lead,
-          CustomField,
-          Tag,
-          LeadTag,
-          LeadNote,
-          LeadActivity,
-          PipelineStage,
-          ImportJob,
-          ExportJob,
-          Followup,
-          EmailTemplate,
-          Campaign,
-          CampaignStep,
-          CampaignMember,
-          Conversation,
-          Message,
-          AiRequest,
-          AnalyticsDaily,
-          Document,
-          DocumentVersion,
-        ],
-        synchronize: true, // Dev mode auto-sync
-        logging: process.env.NODE_ENV === 'development',
-        retryAttempts: 2,
-        retryDelay: 1000,
-      }),
+      useFactory: () => {
+        const isSslRequired =
+          process.env.DB_SSL === 'true' ||
+          process.env.NODE_ENV === 'production' ||
+          Boolean(process.env.DATABASE_URL);
+
+        const commonOptions = {
+          ssl: isSslRequired ? { rejectUnauthorized: false } : false,
+          synchronize: true,
+          logging: process.env.NODE_ENV === 'development',
+          retryAttempts: 3,
+          retryDelay: 1000,
+          entities: [
+            Tenant,
+            User,
+            Membership,
+            Invitation,
+            Session,
+            Role,
+            Permission,
+            RolePermission,
+            Group,
+            GroupMember,
+            PermissionOverride,
+            AuditLog,
+            Lead,
+            CustomField,
+            Tag,
+            LeadTag,
+            LeadNote,
+            LeadActivity,
+            PipelineStage,
+            ImportJob,
+            ExportJob,
+            Followup,
+            EmailTemplate,
+            Campaign,
+            CampaignStep,
+            CampaignMember,
+            Conversation,
+            Message,
+            AiRequest,
+            AnalyticsDaily,
+            Document,
+            DocumentVersion,
+          ],
+        };
+
+        if (process.env.DATABASE_URL) {
+          return {
+            type: 'postgres',
+            url: process.env.DATABASE_URL,
+            ...commonOptions,
+          };
+        }
+
+        return {
+          type: 'postgres',
+          host: process.env.DB_HOST || 'localhost',
+          port: parseInt(process.env.DB_PORT || '5432', 10),
+          username: process.env.DB_USERNAME || 'postgres',
+          password: process.env.DB_PASSWORD || 'postgres',
+          database: process.env.DB_DATABASE || 'leadsphere',
+          ...commonOptions,
+        };
+      },
     }),
     AuthModule,
     TenantModule,
