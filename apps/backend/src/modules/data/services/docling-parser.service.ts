@@ -105,43 +105,62 @@ export class DoclingParserService {
   }
 
   private fallbackDoclingParser(buffer: Buffer, filename: string): DoclingParseResult {
-    const text = buffer.toString('utf-8');
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+    let text = buffer.toString('utf-8');
 
-    let headers: string[] = [];
-    let rows: string[][] = [];
+    // Clean broken multiline email/phone splits
+    text = text.replace(/([a-zA-Z0-9._-]+)\s*\r?\n\s*@\s*\r?\n?\s*([a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi, '$1@$2');
+    text = text.replace(/(\+?\d{8,12})\s*\r?\n\s*(\d{2,4})/g, '$1$2');
 
-    if (lines.length > 0) {
-      const firstLine = lines[0];
-      const delimiter = firstLine.includes('\t')
-        ? '\t'
-        : firstLine.includes(',')
-        ? ','
-        : firstLine.includes('|')
-        ? '|'
-        : null;
+    const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi;
+    const phoneRegex = /(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/;
 
-      if (delimiter) {
-        headers = firstLine.split(delimiter).map((h) => h.trim().replace(/^"|"$/g, ''));
-        lines.slice(1).forEach((line) => {
-          const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
-          if (cols.some((c) => c.length > 0)) {
-            rows.push(cols);
+    const headers = ['Full Name', 'Email', 'Phone', 'Company Name', 'Designation'];
+    const rows: string[][] = [];
+
+    const emailMatches = Array.from(text.matchAll(emailRegex));
+
+    if (emailMatches.length > 0) {
+      emailMatches.forEach((match, idx) => {
+        const email = match[0];
+        const startPos = match.index || 0;
+        const endPos = idx + 1 < emailMatches.length ? (emailMatches[idx + 1].index || text.length) : text.length;
+        const block = text.substring(startPos, endPos);
+
+        const phoneMatch = block.match(phoneRegex);
+        const phone = phoneMatch ? phoneMatch[0].replace(/\s+/g, '') : '';
+
+        const blockClean = block.replace(email, '').replace(phone, '');
+        const tokens = blockClean.split(/\r?\n/).map((t) => t.trim().replace(/^\d+\s*/, '')).filter((t) => t.length > 1);
+
+        let company = '';
+        let name = '';
+        let designation = '';
+
+        tokens.forEach((t) => {
+          const upper = t.toUpperCase();
+          if (/LIMITED|LTD|PVT|PRIVATE|INDUSTRIES|ENTERPRISES|CO\.|MACHINERY|PRODUCTS|SOLVENT|FOOD|CORP/i.test(upper)) {
+            company = t;
+          } else if (!name && /^[A-Za-z\s.]{3,40}$/.test(t)) {
+            name = t;
+          } else if (!designation) {
+            designation = t;
           }
         });
-      } else {
-        headers = ['Name', 'Email', 'Phone', 'Company', 'Designation', 'Estimated Value ($)'];
-        lines.forEach((line) => {
-          const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0);
-          if (cols.length > 0) {
-            rows.push(cols);
-          }
-        });
-      }
-    }
 
-    if (headers.length === 0) {
-      headers = ['Column 1', 'Column 2', 'Column 3'];
+        if (!name && email) {
+          name = email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+        }
+
+        rows.push([name || 'Lead Record', email, phone, company || 'Enterprise', designation || 'Contact']);
+      });
+    } else {
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+      lines.forEach((line) => {
+        const parts = line.split(/[\t,|]|\s{2,}/).map((p) => p.trim()).filter(Boolean);
+        if (parts.length > 0) {
+          rows.push(parts);
+        }
+      });
     }
 
     const tables: DoclingTable[] = [

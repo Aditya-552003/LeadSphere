@@ -178,65 +178,74 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdfDoc = await loadingTask.promise;
 
-      const allLines: string[] = [];
+      let fullRawText = '';
 
       for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
         const page = await pdfDoc.getPage(pageNum);
         const textContent = await page.getTextContent();
-        
-        let lastY: number | null = null;
-        let lineText = '';
 
         textContent.items.forEach((item: any) => {
-          const y = item.transform ? item.transform[5] : null;
-          if (lastY !== null && y !== null && Math.abs(y - lastY) > 4) {
-            if (lineText.trim()) allLines.push(lineText.trim());
-            lineText = '';
+          const str = (item.str || '').trim();
+          if (str) {
+            fullRawText += str + ' ';
           }
-          lineText += (lineText ? '  ' : '') + item.str;
-          if (y !== null) lastY = y;
         });
-        if (lineText.trim()) allLines.push(lineText.trim());
+        fullRawText += '\n';
       }
 
-      let headers: string[] = [];
-      let rows: string[][] = [];
+      // Normalize broken multiline splits (e.g. hchandra904 + @gmail.com or +9193070487 + 00)
+      let textNormalized = fullRawText;
+      textNormalized = textNormalized.replace(/([a-zA-Z0-9._-]+)\s*@\s*([a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi, '$1@$2');
+      textNormalized = textNormalized.replace(/(\+?\d{8,12})\s*(\d{2,4})/g, '$1$2');
 
-      if (allLines.length > 0) {
-        const firstLine = allLines[0];
-        const delimiter = firstLine.includes('\t')
-          ? '\t'
-          : firstLine.includes(',')
-          ? ','
-          : firstLine.includes('|')
-          ? '|'
-          : null;
+      const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi;
+      const phoneRegex = /(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/;
 
-        if (delimiter) {
-          headers = firstLine.split(delimiter).map((h) => h.trim().replace(/^"|"$/g, ''));
-          allLines.slice(1).forEach((line) => {
-            const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
-            if (cols.some((c) => c.length > 0)) rows.push(cols);
+      const emailMatches = Array.from(textNormalized.matchAll(emailRegex));
+
+      const headers = ['Full Name', 'Email', 'Phone', 'Company Name', 'Designation'];
+      const rows: string[][] = [];
+
+      if (emailMatches.length > 0) {
+        emailMatches.forEach((match, idx) => {
+          const email = match[0];
+          const startPos = match.index || 0;
+          const endPos = idx + 1 < emailMatches.length ? (emailMatches[idx + 1].index || textNormalized.length) : textNormalized.length;
+          const block = textNormalized.substring(startPos, endPos);
+
+          const phoneMatch = block.match(phoneRegex);
+          const phone = phoneMatch ? phoneMatch[0].replace(/\s+/g, '') : '';
+
+          const blockClean = block.replace(email, '').replace(phone, '');
+          const tokens = blockClean.split(/\r?\n|\s{2,}/).map((t) => t.trim().replace(/^\d+\s*/, '')).filter((t) => t.length > 1);
+
+          let company = '';
+          let name = '';
+          let designation = '';
+
+          tokens.forEach((t) => {
+            const upper = t.toUpperCase();
+            if (/LIMITED|LTD|PVT|PRIVATE|INDUSTRIES|ENTERPRISES|CO\.|MACHINERY|PRODUCTS|SOLVENT|FOOD|CORP/i.test(upper)) {
+              company = t;
+            } else if (!name && /^[A-Za-z\s.]{3,40}$/.test(t)) {
+              name = t;
+            } else if (!designation) {
+              designation = t;
+            }
           });
-        } else {
-          headers = allLines[0].split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
-          if (headers.length < 2) {
-            headers = ['Full Name', 'Email', 'Phone', 'Company Name', 'Designation'];
-            allLines.forEach((line) => {
-              const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
-              if (cols.length > 0) rows.push(cols);
-            });
-          } else {
-            allLines.slice(1).forEach((line) => {
-              const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
-              if (cols.length > 0) rows.push(cols);
-            });
-          }
-        }
-      }
 
-      if (headers.length === 0) {
-        headers = ['Field 1', 'Field 2', 'Field 3'];
+          if (!name && email) {
+            name = email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+          }
+
+          rows.push([name || 'Lead Record', email, phone, company || 'Enterprise', designation || 'Contact']);
+        });
+      } else {
+        const lines = textNormalized.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        lines.forEach((line) => {
+          const cols = line.split(/\s{2,}|[\t,|]/).map((c) => c.trim()).filter(Boolean);
+          if (cols.length > 0) rows.push(cols);
+        });
       }
 
       const autoMap = detectAutoMapping(headers);
@@ -245,7 +254,7 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
         success: true,
         engine: 'docling_pdfjs_extractor',
         page_count: pdfDoc.numPages,
-        markdown: allLines.join('\n'),
+        markdown: fullRawText,
         tables: [
           {
             table_index: 1,
