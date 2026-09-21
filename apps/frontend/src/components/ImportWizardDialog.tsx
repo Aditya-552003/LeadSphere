@@ -163,7 +163,20 @@ export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={handleReset} maxWidth="md" fullWidth>
+    <Dialog
+      open={open}
+      onClose={handleReset}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          borderRadius: 3,
+          maxHeight: '88vh',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+      }}
+    >
       <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
         <UploadIcon color="primary" /> Multi-Tenant Lead Data Import Wizard (CSV)
       </DialogTitle>
@@ -180,7 +193,7 @@ export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
 
       <Divider />
 
-      <DialogContent sx={{ py: 2.5 }}>
+      <DialogContent sx={{ p: 3, flexGrow: 1, overflowY: 'auto' }}>
         {/* Step 0: Upload / Paste CSV */}
         {activeStep === 0 && (
           <Box sx={{ width: '100%' }}>

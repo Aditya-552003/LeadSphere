@@ -374,8 +374,21 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
   const activeTable = doclingResult?.tables[selectedTableIndex];
 
   return (
-    <Dialog open={open} onClose={handleReset} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <Dialog
+      open={open}
+      onClose={handleReset}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          borderRadius: 3,
+          maxHeight: '88vh',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+      }}
+    >
+      <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <DoclingIcon color="primary" /> Docling PDF Lead Layout & Table Parser
         </Box>
@@ -389,7 +402,7 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
       </DialogTitle>
       <Divider />
 
-      <DialogContent sx={{ py: 2.5 }}>
+      <DialogContent sx={{ p: 3, flexGrow: 1, overflowY: 'auto' }}>
         {step === 'upload' && (
           <Box sx={{ width: '100%' }}>
             <Alert severity="info" sx={{ mb: 2.5 }}>

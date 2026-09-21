@@ -25,6 +25,7 @@ import {
 } from '@mui/icons-material';
 import { ImportWizardDialog } from '../components/ImportWizardDialog';
 import { PdfImportDialog } from '../components/PdfImportDialog';
+import { BulkImportWizardDialog } from '../components/BulkImportWizardDialog';
 
 interface ImportJobRecord {
   id: string;
@@ -52,6 +53,7 @@ export const DataPipelinesPage: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isPdfWizardOpen, setIsPdfWizardOpen] = useState(false);
+  const [isBulkWizardOpen, setIsBulkWizardOpen] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -305,10 +307,10 @@ export const DataPipelinesPage: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<UploadIcon />}
-            onClick={() => setIsWizardOpen(true)}
+            onClick={() => setIsBulkWizardOpen(true)}
             sx={{ py: 1 }}
           >
-            Import CSV Leads
+            Bulk Lead Upload Architecture
           </Button>
 
           <Button
@@ -473,6 +475,13 @@ export const DataPipelinesPage: React.FC = () => {
           </Table>
         )}
       </Paper>
+
+      {/* Unified Bulk Lead Upload Architecture Wizard */}
+      <BulkImportWizardDialog
+        open={isBulkWizardOpen}
+        onClose={() => setIsBulkWizardOpen(false)}
+        onImportCompleted={fetchJobs}
+      />
 
       {/* Multi-step CSV Import Wizard */}
       <ImportWizardDialog

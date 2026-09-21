@@ -414,8 +414,21 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
   const invalidCount = parsedRows.filter((r) => !r.isValid).length;
 
   return (
-    <Dialog open={open} onClose={handleReset} maxWidth="lg" fullWidth>
-      <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', justify: 'space-between' }}>
+    <Dialog
+      open={open}
+      onClose={handleReset}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          borderRadius: 3,
+          maxHeight: '88vh',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+      }}
+    >
+      <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <GeminiIcon color="primary" />
           <Typography variant="h6" sx={{ fontWeight: 700 }}>
@@ -425,8 +438,8 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
         <Chip label="PostgreSQL Pipeline" color="primary" size="small" variant="outlined" />
       </DialogTitle>
 
-      <DialogContent dividers>
-        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
+      <DialogContent dividers sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 3, '& .MuiStepLabel-label': { fontSize: '0.78rem' } }}>
           {STEPS.map((label) => (
             <Step key={label}>
               <StepLabel>{label}</StepLabel>
@@ -436,12 +449,12 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
 
         {/* STEP 0: FILE UPLOAD */}
         {activeStep === 0 && (
-          <Box sx={{ py: 3, textAlign: 'center' }}>
+          <Box sx={{ py: 1, textAlign: 'center', flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <Tabs
               value={fileType}
               onChange={(_, v) => setFileType(v)}
               centered
-              sx={{ mb: 3 }}
+              sx={{ mb: 2.5 }}
             >
               <Tab icon={<ExcelIcon />} label="Excel / CSV (.xlsx, .csv)" value="excel" />
               <Tab icon={<PdfIcon />} label="PDF Document (.pdf)" value="pdf" />
@@ -450,12 +463,17 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
             <Paper
               variant="outlined"
               sx={{
-                p: 5,
-                border: '2px dashed',
+                p: 4,
+                border: '2px dashed #1976d2',
                 borderColor: 'primary.main',
                 bgcolor: 'action.hover',
                 borderRadius: 3,
                 cursor: 'pointer',
+                transition: 'all 0.2s',
+                '&:hover': {
+                  borderColor: '#115293',
+                  bgcolor: 'action.selected',
+                },
               }}
               component="label"
             >
@@ -465,9 +483,9 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
                 accept={fileType === 'pdf' ? '.pdf' : '.xlsx,.xls,.csv'}
                 onChange={handleFileUpload}
               />
-              <UploadIcon sx={{ fontSize: 54, color: 'primary.main', mb: 1 }} />
+              <UploadIcon sx={{ fontSize: 46, color: 'primary.main', mb: 1 }} />
               <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                Click or Drag & Drop {fileType === 'pdf' ? 'PDF Lead Document' : 'Excel/CSV Spreadsheet'}
+                Click to Select or Drag & Drop {fileType === 'pdf' ? 'PDF Lead Document' : 'Excel/CSV Spreadsheet'}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 {fileType === 'pdf'
