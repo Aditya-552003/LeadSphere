@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Body, Param, Res, UseGuards, Header } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Res, UseGuards, Header, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { ImportExportService } from '../services/import-export.service';
+import { DoclingParserService } from '../services/docling-parser.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RequirePermission } from '../../../common/decorators/require-permission.decorator';
 import { TenantContext } from '../../../common/decorators/tenant-context.decorator';
@@ -9,7 +11,46 @@ import { ITenantContext } from '../../../common/interfaces/tenant-context.interf
 @Controller('data')
 @UseGuards(JwtAuthGuard)
 export class ImportExportController {
-  constructor(private readonly importExportService: ImportExportService) {}
+  constructor(
+    private readonly importExportService: ImportExportService,
+    private readonly doclingParserService: DoclingParserService,
+  ) {}
+
+  @Post('imports/pdf-docling')
+  @RequirePermission('leads.create')
+  @UseInterceptors(FileInterceptor('file'))
+  async parsePdfWithDocling(@UploadedFile() file: any) {
+    if (!file || !file.buffer) {
+      throw new BadRequestException('Please upload a valid PDF file');
+    }
+    const result = await this.doclingParserService.parsePdfDocument(file.buffer, file.originalname || 'document.pdf');
+    return { data: result };
+  }
+
+  @Post('imports/commit-pdf')
+  @RequirePermission('leads.create')
+  async commitPdfImport(
+    @TenantContext() ctx: ITenantContext,
+    @Body()
+    body: {
+      filename: string;
+      headers: string[];
+      rows: string[][];
+      columnMapping: Record<string, string>;
+      deduplicationMode?: 'skip' | 'overwrite' | 'create';
+    },
+  ) {
+    const job = await this.importExportService.processDoclingPdfImport(
+      ctx.tenantId,
+      ctx.userId,
+      body.filename || 'import.pdf',
+      body.headers || [],
+      body.rows || [],
+      body.columnMapping || {},
+      body.deduplicationMode || 'skip',
+    );
+    return { data: job };
+  }
 
   @Post('imports/auto-map')
   @RequirePermission('leads.create')

@@ -54,6 +54,12 @@ export class ImportJob {
   @Column({ type: 'jsonb', nullable: true })
   error_log: Array<{ row: number; email?: string; reason: string }>;
 
+  @Column({ type: 'varchar', length: 50, default: 'csv' })
+  parsing_engine: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  extracted_tables_summary: Record<string, any>;
+
   @CreateDateColumn()
   created_at: Date;
 

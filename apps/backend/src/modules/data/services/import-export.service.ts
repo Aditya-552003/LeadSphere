@@ -217,6 +217,151 @@ export class ImportExportService {
     return importJob;
   }
 
+  async processDoclingPdfImport(
+    tenantId: string,
+    userId: string,
+    filename: string,
+    headers: string[],
+    rows: string[][],
+    columnMapping: Record<string, string>,
+    deduplicationMode: 'skip' | 'overwrite' | 'create' = 'skip',
+  ) {
+    if (!rows || rows.length === 0) {
+      throw new Error('PDF document contains no parsed lead rows');
+    }
+
+    const importJob = this.importJobRepository.create({
+      tenant_id: tenantId,
+      created_by: userId,
+      filename,
+      total_rows: rows.length,
+      status: ImportStatus.PROCESSING,
+      column_mapping: columnMapping,
+      parsing_engine: 'docling',
+      error_log: [],
+    });
+    await this.importJobRepository.save(importJob);
+
+    let successCount = 0;
+    let failCount = 0;
+    let dupCount = 0;
+    const errorLog: Array<{ row: number; email?: string; reason: string }> = [];
+
+    const existingLeads = await this.leadRepository.find({
+      where: { tenant_id: tenantId },
+      select: ['id', 'email', 'phone'],
+    });
+
+    const emailMap = new Map<string, Lead>();
+    const phoneMap = new Map<string, Lead>();
+
+    existingLeads.forEach((l) => {
+      if (l.email) emailMap.set(l.email.toLowerCase(), l);
+      if (l.phone) phoneMap.set(l.phone.replace(/\D/g, ''), l);
+    });
+
+    for (let i = 0; i < rows.length; i++) {
+      const rowNum = i + 1;
+      const values = rows[i];
+
+      const record: Record<string, any> = {};
+      headers.forEach((h, index) => {
+        const targetField = columnMapping[h];
+        if (targetField && targetField !== 'ignore') {
+          record[targetField] = values[index] ? values[index].trim() : '';
+        }
+      });
+
+      const email = record.email ? record.email.toLowerCase() : null;
+      const phoneDigits = record.phone ? record.phone.replace(/\D/g, '') : null;
+
+      if (!record.first_name && !email) {
+        failCount++;
+        errorLog.push({ row: rowNum, email: email || '', reason: 'Missing lead name and email' });
+        continue;
+      }
+
+      const existingByEmail = email ? emailMap.get(email) : null;
+      const existingByPhone = phoneDigits ? phoneMap.get(phoneDigits) : null;
+      const existingLead = existingByEmail || existingByPhone;
+
+      if (existingLead) {
+        if (deduplicationMode === 'skip') {
+          dupCount++;
+          errorLog.push({ row: rowNum, email: email || '', reason: 'Duplicate lead found (skipped)' });
+          continue;
+        } else if (deduplicationMode === 'overwrite') {
+          existingLead.first_name = record.first_name || existingLead.first_name;
+          existingLead.last_name = record.last_name || existingLead.last_name;
+          existingLead.full_name = `${existingLead.first_name} ${existingLead.last_name}`.trim();
+          existingLead.company_name = record.company_name || existingLead.company_name;
+          existingLead.designation = record.designation || record.title || existingLead.designation;
+          if (record.estimated_value) {
+            existingLead.custom = { ...(existingLead.custom || {}), estimated_value: Number(record.estimated_value) };
+          }
+          await this.leadRepository.save(existingLead);
+
+          await this.activityRepository.save(
+            this.activityRepository.create({
+              tenant_id: tenantId,
+              lead_id: existingLead.id,
+              actor_membership_id: userId,
+              type: 'LEAD_UPDATED',
+              payload: { description: `Lead updated via Docling PDF import (${filename})` },
+            }),
+          );
+          successCount++;
+          continue;
+        }
+      }
+
+      const firstName = record.first_name || 'Lead';
+      const lastName = record.last_name || '';
+      const fullName = `${firstName} ${lastName}`.trim();
+
+      const newLead = this.leadRepository.create({
+        tenant_id: tenantId,
+        first_name: firstName,
+        last_name: lastName,
+        full_name: fullName,
+        email: email || undefined,
+        email_normalized: email || undefined,
+        phone: record.phone || undefined,
+        phone_e164: record.phone ? record.phone.replace(/[^\d+]/g, '') : undefined,
+        company_name: record.company_name || undefined,
+        designation: record.designation || record.title || undefined,
+        lead_score: 80,
+        custom: { estimated_value: record.estimated_value ? Number(record.estimated_value) : 0 },
+      });
+
+      const saved = (await this.leadRepository.save(newLead)) as Lead;
+      if (email) emailMap.set(email, saved);
+      if (phoneDigits) phoneMap.set(phoneDigits, saved);
+
+      await this.activityRepository.save(
+        this.activityRepository.create({
+          tenant_id: tenantId,
+          lead_id: saved.id,
+          actor_membership_id: userId,
+          type: 'LEAD_IMPORTED',
+          payload: { description: `Lead imported via Docling PDF (${filename})` },
+        }),
+      );
+
+      successCount++;
+    }
+
+    importJob.processed_rows = rows.length;
+    importJob.successful_rows = successCount;
+    importJob.failed_rows = failCount;
+    importJob.duplicate_rows = dupCount;
+    importJob.status = ImportStatus.COMPLETED;
+    importJob.error_log = errorLog;
+
+    await this.importJobRepository.save(importJob);
+    return importJob;
+  }
+
   async getImportJobs(tenantId: string) {
     return this.importJobRepository.find({
       where: { tenant_id: tenantId },
