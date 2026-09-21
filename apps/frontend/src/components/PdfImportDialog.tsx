@@ -76,6 +76,7 @@ const LEAD_FIELDS = [
   { key: 'phone', label: 'Phone Number' },
   { key: 'company_name', label: 'Company Name' },
   { key: 'designation', label: 'Title / Designation' },
+  { key: 'location', label: 'Location / City' },
   { key: 'ignore', label: '— Ignore Column —' },
 ];
 
@@ -159,6 +160,10 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
       'organization': 'company_name',
       'title': 'designation',
       'designation': 'designation',
+      'location': 'location',
+      'city': 'location',
+      'address': 'location',
+      'place': 'location',
     };
     const mapping: Record<string, string> = {};
     headers.forEach((h) => {

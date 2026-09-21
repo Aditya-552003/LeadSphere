@@ -35,6 +35,7 @@ import {
   Phone as PhoneIcon,
   AttachMoney as MoneyIcon,
   Star as ScoreIcon,
+  LocationOn as LocationOnIcon,
 } from '@mui/icons-material';
 
 interface LeadDetailDialogProps {
@@ -75,8 +76,8 @@ export const LeadDetailDialog: React.FC<LeadDetailDialogProps> = ({
     if (!leadId) return;
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
       // Fetch Lead Info
       const leadRes = await fetch(`/api/v1/leads/${leadId}`, { headers });
@@ -100,7 +101,7 @@ export const LeadDetailDialog: React.FC<LeadDetailDialogProps> = ({
 
     setSubmittingNote(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
       const res = await fetch(`/api/v1/leads/${leadId}/notes`, {
         method: 'POST',
         headers: {
@@ -203,6 +204,10 @@ export const LeadDetailDialog: React.FC<LeadDetailDialogProps> = ({
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <PersonIcon fontSize="small" color="action" />
                     <Typography variant="body2">{lead.title || 'N/A'}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <LocationOnIcon fontSize="small" color="action" />
+                    <Typography variant="body2">{lead.location || lead.city || 'N/A'}</Typography>
                   </Box>
                 </Stack>
               </Paper>

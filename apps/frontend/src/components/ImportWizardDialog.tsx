@@ -52,6 +52,7 @@ const TARGET_FIELDS = [
   { label: 'Phone Number', value: 'phone' },
   { label: 'Company Name', value: 'company_name' },
   { label: 'Title / Designation', value: 'title' },
+  { label: 'Location / City', value: 'location' },
   { label: 'Status / Stage', value: 'status' },
   { label: 'Ignore Column', value: 'ignore' },
 ];

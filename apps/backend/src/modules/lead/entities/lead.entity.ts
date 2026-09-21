@@ -63,6 +63,9 @@ export class Lead {
   @Column({ type: 'text', nullable: true })
   city: string;
 
+  @Column({ type: 'text', nullable: true })
+  location: string;
+
   @Column({ type: 'text', default: 'manual' })
   source: string;
 

@@ -32,6 +32,8 @@ interface LeadRecord {
   designation?: string;
   email?: string;
   phone?: string;
+  location?: string;
+  city?: string;
   score?: number;
   lead_score?: number;
   status?: string;
@@ -64,6 +66,48 @@ export const LeadsPage: React.FC = () => {
 
   const fetchLeads = async () => {
     const key = getStorageKey();
+    const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+
+    if (token) {
+      try {
+        const res = await fetch('/api/v1/leads?limit=100', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.data && Array.isArray(data.data)) {
+            const backendLeads: LeadRecord[] = data.data.map((l: any) => ({
+              ...l,
+              full_name: l.full_name || `${l.first_name || ''} ${l.last_name || ''}`.trim() || 'Unnamed Lead',
+              designation: l.title || l.designation || 'N/A',
+              lead_score: l.score || l.lead_score || 0,
+              location: l.location || l.city || 'N/A',
+            }));
+
+            // Read local storage to preserve any locally created leads
+            const stored = localStorage.getItem(key);
+            let localLeads: LeadRecord[] = stored ? JSON.parse(stored) : [];
+
+            // Merge localLeads not in backendLeads
+            const backendIds = new Set(backendLeads.map((b) => b.id));
+            const extraLocal = localLeads.filter((l) => !backendIds.has(l.id));
+
+            const combined = [...extraLocal, ...backendLeads].filter(
+              (l) =>
+                !['alex@apexdigital.com', 'sophia@starlight.test', 'marcus@nexus.test', 'elena@vanguard.test'].includes(l.email || '') &&
+                !['Alexander Vance', 'Sophia Reynolds', 'Marcus Brody', 'Elena Rostova'].includes(l.full_name || ''),
+            );
+
+            setLeads(combined);
+            localStorage.setItem(key, JSON.stringify(combined));
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch leads from backend:', err);
+      }
+    }
+
     const stored = localStorage.getItem(key);
     if (stored) {
       try {
@@ -74,32 +118,8 @@ export const LeadsPage: React.FC = () => {
             !['Alexander Vance', 'Sophia Reynolds', 'Marcus Brody', 'Elena Rostova'].includes(l.full_name || ''),
         );
         setLeads(parsed);
-        localStorage.setItem(key, JSON.stringify(parsed));
         return;
       } catch (e) {}
-    }
-
-    try {
-      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
-      if (token) {
-        const res = await fetch('/api/v1/leads?limit=100', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (data.data && Array.isArray(data.data)) {
-          const formatted = data.data.map((l: any) => ({
-            ...l,
-            full_name: `${l.first_name || ''} ${l.last_name || ''}`.trim() || 'Unnamed Lead',
-            designation: l.title || 'N/A',
-            lead_score: l.score || 0,
-          }));
-          setLeads(formatted);
-          localStorage.setItem(key, JSON.stringify(formatted));
-          return;
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch leads from backend:', err);
     }
 
     setLeads([]);
@@ -156,6 +176,14 @@ export const LeadsPage: React.FC = () => {
           <PhoneIcon fontSize="small" color="action" />
           <Typography variant="body2">{params.value || 'N/A'}</Typography>
         </Box>
+      ),
+    },
+    {
+      field: 'location',
+      headerName: 'Location',
+      width: 140,
+      renderCell: (params) => (
+        <Typography variant="body2">{params.value || params.row.city || 'N/A'}</Typography>
       ),
     },
     {

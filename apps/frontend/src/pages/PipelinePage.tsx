@@ -85,8 +85,8 @@ export const PipelinePage: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
       // Fetch stages
       const stagesRes = await fetch('/api/v1/pipeline/stages', { headers });

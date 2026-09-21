@@ -23,6 +23,10 @@ export class CreateLeadDto {
 
   @IsString()
   @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
   industry?: string;
 
   @IsEmail({}, { message: 'Email must be valid' })
@@ -32,6 +36,14 @@ export class CreateLeadDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  location?: string;
+
+  @IsString()
+  @IsOptional()
+  city?: string;
 
   @IsString()
   @IsOptional()

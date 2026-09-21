@@ -95,9 +95,13 @@ export class LeadService {
     const emailNormalized = dto.email ? dto.email.toLowerCase().trim() : undefined;
     const phoneE164 = dto.phone ? dto.phone.replace(/[^\d+]/g, '') : undefined;
     const leadScore = this.calculateRuleBasedScore(dto);
+    const designation = dto.designation || dto.title || undefined;
+    const location = dto.location || dto.city || undefined;
 
     const lead = this.leadRepository.create({
       ...dto,
+      designation,
+      location,
       tenant_id: tenantId,
       email_normalized: emailNormalized,
       phone_e164: phoneE164,
