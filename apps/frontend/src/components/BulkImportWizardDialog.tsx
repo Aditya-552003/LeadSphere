@@ -489,12 +489,16 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
         // Extract PDF base64 & raw text
         try {
           const arrayBuffer = await file.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuffer);
-          let binary = '';
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          pdfBase64 = btoa(binary);
+
+          pdfBase64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const resStr = (reader.result as string) || '';
+              resolve(resStr.split(',')[1] || '');
+            };
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(file);
+          });
 
           const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
           const pdfDoc = await loadingTask.promise;

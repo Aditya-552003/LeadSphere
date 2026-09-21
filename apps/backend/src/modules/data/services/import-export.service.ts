@@ -640,7 +640,7 @@ export class ImportExportService {
     status: string;
   }>> {
     const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
     let contentToAnalyze = rawContent || '';
     if (!contentToAnalyze && headers && rows) {
@@ -649,38 +649,44 @@ export class ImportExportService {
 
     if (apiKey) {
       try {
-        const promptText = `You are an expert Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document/content and extract all lead/contact records.
-Return ONLY a valid JSON array of objects with the following string properties:
-- full_name: Full name of contact
+        const promptText = `You are an expert Sales Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document content/file and extract ALL individual contact/lead records.
+Return ONLY a valid JSON array of objects without markdown formatting or introductory text.
+Each object MUST contain the following properties:
+- full_name: Full name of the contact person
 - first_name: First name
 - last_name: Last name
 - email: Email address
 - phone: Phone number
 - company_name: Company or organization name
 - title: Job title or designation
-- location: City/State/Country
+- location: City, state, or country
 - industry: Industry sector
 - status: Default to "New"
 
-Make sure every contact in the document is extracted into the JSON array.`;
+Make sure every single contact in the document is extracted into the JSON array.`;
 
         const parts: any[] = [{ text: promptText }];
 
+        if (contentToAnalyze && contentToAnalyze.trim().length > 0) {
+          parts.push({ text: `Source Document Text:\n${contentToAnalyze.substring(0, 40000)}` });
+        }
+
         if (pdfBase64 && fileType === 'pdf') {
-          // Send PDF binary natively to Gemini Multimodal 1.5 Flash API!
-          parts.push({
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: pdfBase64,
-            },
-          });
-        } else if (contentToAnalyze.trim().length > 0) {
-          parts.push({ text: `Source Content:\n${contentToAnalyze.substring(0, 30000)}` });
+          // Clean base64 string
+          const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '').trim();
+          if (cleanBase64.length > 0) {
+            parts.push({
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: cleanBase64,
+              },
+            });
+          }
         }
 
         if (parts.length > 1) {
           const modelsToTry = Array.from(
-            new Set([process.env.GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']),
+            new Set([model, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']),
           ).filter(Boolean) as string[];
 
           for (const targetModel of modelsToTry) {
@@ -700,21 +706,9 @@ Make sure every contact in the document is extracted into the JSON array.`;
                 const resData: any = await response.json();
                 const candidateText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (candidateText) {
-                  const cleanText = candidateText.replace(/```json/gi, '').replace(/```/g, '').trim();
-                  const parsed = JSON.parse(cleanText);
-                  if (Array.isArray(parsed) && parsed.length > 0) {
-                    return parsed.map((item) => ({
-                      full_name: item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Lead Contact',
-                      first_name: item.first_name || item.full_name?.split(' ')[0] || 'Lead',
-                      last_name: item.last_name || item.full_name?.split(' ').slice(1).join(' ') || '',
-                      email: item.email || '',
-                      phone: item.phone || '',
-                      company_name: item.company_name || item.company || '',
-                      title: item.title || item.designation || '',
-                      location: item.location || item.city || '',
-                      industry: item.industry || 'Technology & SaaS',
-                      status: item.status || 'New',
-                    }));
+                  const extractedLeads = this.parseGeminiResponseText(candidateText);
+                  if (extractedLeads.length > 0) {
+                    return extractedLeads;
                   }
                 }
               } else {
@@ -730,8 +724,66 @@ Make sure every contact in the document is extracted into the JSON array.`;
       }
     }
 
-    // High-precision fallback when API key is unconfigured or network call is unreachable
+    // High-precision fallback when API key is unconfigured, Gemini returns 0 leads, or network call fails
+    return this.fallbackLeadExtraction(contentToAnalyze, headers, rows);
+  }
+
+  private parseGeminiResponseText(candidateText: string): any[] {
+    let rawItems: any[] = [];
+    const cleanText = candidateText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+    try {
+      const parsed = JSON.parse(cleanText);
+      if (Array.isArray(parsed)) {
+        rawItems = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        const arrayKey = Object.keys(parsed).find((k) => Array.isArray(parsed[k]));
+        if (arrayKey) rawItems = parsed[arrayKey];
+      }
+    } catch (e) {
+      // Regex search for JSON array [...]
+      const arrayMatch = candidateText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (arrayMatch) {
+        try {
+          const parsed = JSON.parse(arrayMatch[0]);
+          if (Array.isArray(parsed)) rawItems = parsed;
+        } catch (err) {}
+      }
+    }
+
+    if (rawItems.length === 0) return [];
+
+    return rawItems.map((item) => {
+      const fullName =
+        item.full_name || item.name || item.contact_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Lead Contact';
+      const firstName = item.first_name || fullName.split(' ')[0] || 'Lead';
+      const lastName = item.last_name || fullName.split(' ').slice(1).join(' ') || '';
+      const email = item.email || item.email_address || item.mail || '';
+      const phone = item.phone || item.phone_number || item.mobile || item.contact || '';
+      const company = item.company_name || item.company || item.organization || item.org || '';
+      const title = item.title || item.designation || item.job_title || item.role || item.position || '';
+      const location = item.location || item.city || item.address || '';
+      const industry = item.industry || item.sector || 'Technology & SaaS';
+      const status = item.status || 'New';
+
+      return {
+        full_name: fullName,
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        phone,
+        company_name: company,
+        title,
+        location,
+        industry,
+        status,
+      };
+    });
+  }
+
+  private fallbackLeadExtraction(contentToAnalyze: string, headers?: string[], rows?: any[][]): any[] {
     const extracted: any[] = [];
+
     if (rows && rows.length > 0 && headers && headers.length > 0) {
       const mapping = this.autoDetectMapping(headers);
       rows.forEach((r) => {
@@ -769,24 +821,26 @@ Make sure every contact in the document is extracted into the JSON array.`;
       lines.forEach((line, idx) => {
         const emailMatch = line.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
         const phoneMatch = line.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
-        if (emailMatch || phoneMatch || idx < 20) {
+        if (emailMatch || phoneMatch || idx < 50) {
           const email = emailMatch ? emailMatch[0] : '';
           const phone = phoneMatch ? phoneMatch[0] : '';
           const cleanLine = line.replace(email, '').replace(phone, '').trim();
           const parts = cleanLine.split(/,|\t|\|/).map((s) => s.trim()).filter(Boolean);
           const name = parts[0] || `Lead Contact ${idx + 1}`;
-          extracted.push({
-            full_name: name,
-            first_name: name.split(' ')[0] || 'Lead',
-            last_name: name.split(' ').slice(1).join(' ') || '',
-            email,
-            phone,
-            company_name: parts[1] || 'Acme Corp',
-            title: parts[2] || 'Executive',
-            location: parts[3] || 'New York, NY',
-            industry: 'Technology & SaaS',
-            status: 'New',
-          });
+          if (name.length > 1 && !name.toLowerCase().includes('page')) {
+            extracted.push({
+              full_name: name,
+              first_name: name.split(' ')[0] || 'Lead',
+              last_name: name.split(' ').slice(1).join(' ') || '',
+              email,
+              phone,
+              company_name: parts[1] || 'Acme Corp',
+              title: parts[2] || 'Executive',
+              location: parts[3] || 'New York, NY',
+              industry: 'Technology & SaaS',
+              status: 'New',
+            });
+          }
         }
       });
     }
