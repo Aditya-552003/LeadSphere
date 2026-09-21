@@ -40,5 +40,8 @@
     "uuid": "^11.1.0",
     "picomatch": "^4.0.3",
     "glob": "^10.4.5"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }

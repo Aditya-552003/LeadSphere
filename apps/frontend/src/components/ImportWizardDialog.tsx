@@ -35,13 +35,15 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 
+import * as XLSX from 'xlsx';
+
 interface ImportWizardDialogProps {
   open: boolean;
   onClose: () => void;
   onImportCompleted: () => void;
 }
 
-const STEPS = ['Upload CSV Data', 'Map CSV Columns', 'Deduplication Settings', 'Import Summary'];
+const STEPS = ['Upload File (CSV/Excel)', 'Map Columns', 'Deduplication Settings', 'Import Summary'];
 
 const TARGET_FIELDS = [
   { label: 'First Name', value: 'first_name' },
@@ -182,7 +184,7 @@ export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
         {activeStep === 0 && (
           <Box sx={{ width: '100%' }}>
             <Alert severity="info" sx={{ mb: 2.5 }}>
-              Browse and upload a CSV file from your computer, or paste raw CSV text below. The first line must contain column headers.
+              Browse and upload a CSV or Excel (.xlsx, .xls) file from your computer, or paste raw text below. The first row must contain column headers.
             </Alert>
 
             {/* File Browse / Dropzone Paper */}
@@ -209,27 +211,47 @@ export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
             >
               <input
                 type="file"
-                accept=".csv,.txt"
+                accept=".csv,.xlsx,.xls,.txt"
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
                     const file = e.target.files[0];
                     setFilename(file.name);
-                    const reader = new FileReader();
-                    reader.onload = (evt) => {
-                      const text = (evt.target?.result as string) || '';
-                      setCsvContent(text);
-                    };
-                    reader.readAsText(file);
+                    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+
+                    if (isExcel) {
+                      const reader = new FileReader();
+                      reader.onload = (evt) => {
+                        try {
+                          const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+                          const workbook = XLSX.read(data, { type: 'array' });
+                          const firstSheetName = workbook.SheetNames[0];
+                          const worksheet = workbook.Sheets[firstSheetName];
+                          const csv = XLSX.utils.sheet_to_csv(worksheet);
+                          setCsvContent(csv);
+                        } catch (err) {
+                          console.error('Failed to parse Excel file:', err);
+                          alert('Error reading Excel spreadsheet. Please ensure it is a valid .xlsx or .xls file.');
+                        }
+                      };
+                      reader.readAsArrayBuffer(file);
+                    } else {
+                      const reader = new FileReader();
+                      reader.onload = (evt) => {
+                        const text = (evt.target?.result as string) || '';
+                        setCsvContent(text);
+                      };
+                      reader.readAsText(file);
+                    }
                   }
                 }}
               />
               <UploadIcon color="primary" sx={{ fontSize: 44, mb: 1 }} />
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {filename ? filename : 'Click to select or drop CSV lead file'}
+                {filename ? filename : 'Click to select or drop CSV or Excel lead file (.csv, .xlsx, .xls)'}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Supports CSV lead rosters, contact cards, and exported summaries
+                Supports CSV spreadsheets, Excel workbooks (.xlsx, .xls), and exported rosters
               </Typography>
             </Paper>
 
