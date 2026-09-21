@@ -23,17 +23,18 @@ import {
   Chip,
   Alert,
   IconButton,
-  Tooltip,
   RadioGroup,
   FormControlLabel,
   Radio,
   Tabs,
   Tab,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
   CheckCircle as SuccessIcon,
-  Error as ErrorIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
   AutoAwesome as GeminiIcon,
@@ -41,8 +42,14 @@ import {
   TableChart as ExcelIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
+  ExpandMore as ExpandMoreIcon,
+  Tune as SettingsIcon,
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure pdfjs worker for client PDF extraction
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface BulkImportWizardDialogProps {
   open: boolean;
@@ -50,13 +57,7 @@ interface BulkImportWizardDialogProps {
   onImportCompleted: () => void;
 }
 
-const STEPS = [
-  'Upload File',
-  'Gemini AI Column Mapping',
-  'Validation & Deduplication',
-  'Import Preview & Edit',
-  'PostgreSQL Commit',
-];
+const STEPS = ['Upload File', 'Extracted Leads Table Preview', 'PostgreSQL Commit'];
 
 const STANDARD_SCHEMA = [
   { label: 'Full Name', value: 'full_name' },
@@ -88,7 +89,6 @@ interface ParsedLeadRow {
   isValid: boolean;
   isDuplicate: boolean;
   validationError?: string;
-  isEditing?: boolean;
 }
 
 export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
@@ -121,68 +121,24 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
     return 'leads_default';
   };
 
-  // Step 1: Handle File Upload (Excel or PDF)
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  // Helper: Client & Gemini AI Column Mapper
+  const runGeminiAutoMap = async (headers: string[]): Promise<Record<string, string>> => {
+    const initialMapping: Record<string, string> = {};
+    headers.forEach((h) => {
+      const clean = h.trim().toLowerCase().replace(/[\s\-_]+/g, '_');
+      if (['name', 'full_name', 'fullname', 'lead_name', 'contact_name'].includes(clean)) initialMapping[h] = 'full_name';
+      else if (['first_name', 'firstname', 'fname'].includes(clean)) initialMapping[h] = 'first_name';
+      else if (['last_name', 'lastname', 'lname', 'surname'].includes(clean)) initialMapping[h] = 'last_name';
+      else if (['email', 'e-mail', 'mail', 'email_address', 'contact_email'].includes(clean)) initialMapping[h] = 'email';
+      else if (['phone', 'phone_number', 'mobile', 'cell', 'contact', 'whatsapp'].includes(clean)) initialMapping[h] = 'phone';
+      else if (['company', 'company_name', 'organization', 'org'].includes(clean)) initialMapping[h] = 'company_name';
+      else if (['title', 'designation', 'job_title', 'position', 'role'].includes(clean)) initialMapping[h] = 'title';
+      else if (['location', 'city', 'address', 'place', 'state', 'country'].includes(clean)) initialMapping[h] = 'location';
+      else if (['industry', 'category', 'sector'].includes(clean)) initialMapping[h] = 'industry';
+      else if (['status', 'stage'].includes(clean)) initialMapping[h] = 'status';
+      else initialMapping[h] = 'ignore';
+    });
 
-    setFilename(file.name);
-    setLoading(true);
-
-    try {
-      const ext = file.name.split('.').pop()?.toLowerCase();
-
-      if (ext === 'pdf' || fileType === 'pdf') {
-        // Handle PDF upload via backend parser
-        setFileType('pdf');
-        const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const res = await fetch('/api/v1/data/imports/pdf-docling', {
-          method: 'POST',
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: formData,
-        });
-
-        if (res.ok) {
-          const resData = await res.json();
-          const docData = resData.data;
-          if (docData && docData.headers && docData.rows) {
-            setRawHeaders(docData.headers);
-            setRawRows(docData.rows);
-            await runGeminiAutoMap(docData.headers);
-            setActiveStep(1);
-          }
-        }
-      } else {
-        // Handle Excel / CSV upload via SheetJS
-        setFileType('excel');
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const jsonRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-        if (jsonRows.length > 0) {
-          const headers = jsonRows[0].map((h: any) => String(h || '').trim());
-          const dataRows = jsonRows.slice(1).filter((r) => r.some((cell) => cell !== null && cell !== ''));
-          setRawHeaders(headers);
-          setRawRows(dataRows);
-          await runGeminiAutoMap(headers);
-          setActiveStep(1);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to parse upload file:', err);
-      alert('Failed to parse uploaded file. Please check file formatting.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Step 2: Gemini AI Column Recognition
-  const runGeminiAutoMap = async (headers: string[]) => {
     try {
       const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
       const res = await fetch('/api/v1/data/imports/auto-map', {
@@ -196,20 +152,24 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
 
       if (res.ok) {
         const resData = await res.json();
-        if (resData.data) {
-          setColumnMapping(resData.data);
+        if (resData.data && Object.keys(resData.data).length > 0) {
+          return { ...initialMapping, ...resData.data };
         }
       }
     } catch (err) {
       console.error('Gemini AI column auto-map failed:', err);
     }
+
+    return initialMapping;
   };
 
-  // Step 3: Run Data Validation & Duplicate Detection
-  const handleProceedToValidation = async () => {
-    setLoading(true);
-
-    const generatedRows: ParsedLeadRow[] = rawRows.map((row, idx) => {
+  // Helper: Process and feed parsed rows into table state
+  const processAndFeedTable = async (
+    headers: string[],
+    dataRows: any[][],
+    mapping: Record<string, string>,
+  ) => {
+    const generatedRows: ParsedLeadRow[] = dataRows.map((row, idx) => {
       let fullName = '';
       let firstName = '';
       let lastName = '';
@@ -221,8 +181,8 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
       let industry = '';
       let status = 'New';
 
-      rawHeaders.forEach((h, colIdx) => {
-        const targetField = columnMapping[h];
+      headers.forEach((h, colIdx) => {
+        const targetField = mapping[h];
         const cellValue = String(row[colIdx] || '').trim();
 
         if (targetField === 'full_name') fullName = cellValue;
@@ -246,7 +206,6 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
         lastName = parts.slice(1).join(' ') || '';
       }
 
-      // Email validation
       const emailValid = !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
       const isValid = Boolean(fullName && emailValid);
       const validationError = !emailValid ? 'Invalid Email Format' : !fullName ? 'Missing Name' : undefined;
@@ -270,8 +229,14 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
       };
     });
 
-    // Run backend duplicate detection
+    // Run duplicate detection against local storage & backend DB
     try {
+      const key = getStorageKey();
+      const stored = localStorage.getItem(key);
+      const localExisting: any[] = stored ? JSON.parse(stored) : [];
+      const localEmails = new Set(localExisting.map((l) => l.email?.toLowerCase().trim()).filter(Boolean));
+      const localPhones = new Set(localExisting.map((l) => l.phone?.replace(/[^\d+]/g, '')).filter(Boolean));
+
       const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
       const checkRecords = generatedRows.map((r) => ({ email: r.email, phone: r.phone }));
 
@@ -284,33 +249,304 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
         body: JSON.stringify({ records: checkRecords }),
       });
 
+      const dbDupEmails = new Set<string>();
+      const dbDupPhones = new Set<string>();
+
       if (res.ok) {
         const resData = await res.json();
         const dupData = resData.data;
         if (dupData) {
-          const dupEmails = new Set(dupData.duplicateEmails || []);
-          const dupPhones = new Set(dupData.duplicatePhones || []);
+          (dupData.duplicateEmails || []).forEach((e: string) => dbDupEmails.add(e.toLowerCase().trim()));
+          (dupData.duplicatePhones || []).forEach((p: string) => dbDupPhones.add(p.replace(/[^\d+]/g, '')));
+        }
+      }
 
-          generatedRows.forEach((r) => {
-            if (
-              (r.email && dupEmails.has(r.email.toLowerCase().trim())) ||
-              (r.phone && dupPhones.has(r.phone.replace(/[^\d+]/g, '')))
-            ) {
-              r.isDuplicate = true;
-            }
-          });
+      generatedRows.forEach((r) => {
+        const emailClean = r.email?.toLowerCase().trim();
+        const phoneClean = r.phone?.replace(/[^\d+]/g, '');
+
+        if (
+          (emailClean && (dbDupEmails.has(emailClean) || localEmails.has(emailClean))) ||
+          (phoneClean && (dbDupPhones.has(phoneClean) || localPhones.has(phoneClean)))
+        ) {
+          r.isDuplicate = true;
+        }
+      });
+    } catch (err) {
+      console.error('Failed to detect duplicates:', err);
+    }
+
+    setParsedRows(generatedRows);
+  };
+
+  // Helper: Call Gemini AI Lead Extraction Endpoint
+  const extractLeadsWithGeminiAPI = async (
+    fileKind: 'pdf' | 'excel',
+    content: string,
+    headers?: string[],
+    rows?: any[][],
+  ): Promise<any[]> => {
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const res = await fetch('/api/v1/data/imports/gemini-extract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          fileType: fileKind,
+          rawContent: content,
+          headers,
+          rows,
+        }),
+      });
+
+      if (res.ok) {
+        const resData = await res.json();
+        if (Array.isArray(resData.data) && resData.data.length > 0) {
+          return resData.data;
         }
       }
     } catch (err) {
+      console.error('Gemini lead extraction request failed:', err);
+    }
+    return [];
+  };
+
+  // Helper: Process and feed Gemini AI extracted leads into table state
+  const processAndFeedGeminiLeads = async (rawLeads: any[], defaultRows?: any[][], defaultHeaders?: string[], mapping?: Record<string, string>) => {
+    let generatedRows: ParsedLeadRow[] = [];
+
+    if (rawLeads && rawLeads.length > 0) {
+      generatedRows = rawLeads.map((item, idx) => {
+        const fullName = item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || `Lead #${idx + 1}`;
+        const firstName = item.first_name || fullName.split(' ')[0] || 'Lead';
+        const lastName = item.last_name || fullName.split(' ').slice(1).join(' ') || '';
+        const email = item.email ? String(item.email).trim() : '';
+        const phone = item.phone ? String(item.phone).trim() : '';
+        const company = item.company_name || item.company || '';
+        const title = item.title || item.designation || '';
+        const location = item.location || item.city || '';
+        const industry = item.industry || 'Technology & SaaS';
+        const status = item.status || 'New';
+
+        const emailValid = !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        const isValid = Boolean(fullName && emailValid);
+        const validationError = !emailValid ? 'Invalid Email Format' : !fullName ? 'Missing Name' : undefined;
+
+        return {
+          id: `row_${idx}_${Date.now()}`,
+          originalIndex: idx + 1,
+          full_name: fullName,
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone,
+          company_name: company,
+          title,
+          location,
+          industry,
+          status,
+          isValid,
+          isDuplicate: false,
+          validationError,
+        };
+      });
+    } else if (defaultRows && defaultHeaders && mapping) {
+      generatedRows = defaultRows.map((row, idx) => {
+        let fullName = '';
+        let firstName = '';
+        let lastName = '';
+        let email = '';
+        let phone = '';
+        let company = '';
+        let title = '';
+        let location = '';
+        let industry = '';
+        let status = 'New';
+
+        defaultHeaders.forEach((h, colIdx) => {
+          const targetField = mapping[h];
+          const cellValue = String(row[colIdx] || '').trim();
+
+          if (targetField === 'full_name') fullName = cellValue;
+          else if (targetField === 'first_name') firstName = cellValue;
+          else if (targetField === 'last_name') lastName = cellValue;
+          else if (targetField === 'email') email = cellValue;
+          else if (targetField === 'phone') phone = cellValue;
+          else if (targetField === 'company_name') company = cellValue;
+          else if (targetField === 'title') title = cellValue;
+          else if (targetField === 'location') location = cellValue;
+          else if (targetField === 'industry') industry = cellValue;
+          else if (targetField === 'status') status = cellValue;
+        });
+
+        if (!fullName) {
+          fullName = `${firstName} ${lastName}`.trim() || `Lead #${idx + 1}`;
+        }
+        if (!firstName && fullName) {
+          const parts = fullName.split(' ');
+          firstName = parts[0] || 'Lead';
+          lastName = parts.slice(1).join(' ') || '';
+        }
+
+        const emailValid = !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        const isValid = Boolean(fullName && emailValid);
+        const validationError = !emailValid ? 'Invalid Email Format' : !fullName ? 'Missing Name' : undefined;
+
+        return {
+          id: `row_${idx}_${Date.now()}`,
+          originalIndex: idx + 1,
+          full_name: fullName,
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone,
+          company_name: company,
+          title,
+          location,
+          industry: industry || 'Technology & SaaS',
+          status: status || 'New',
+          isValid,
+          isDuplicate: false,
+          validationError,
+        };
+      });
+    }
+
+    // Run duplicate detection against local storage & backend DB
+    try {
+      const key = getStorageKey();
+      const stored = localStorage.getItem(key);
+      const localExisting: any[] = stored ? JSON.parse(stored) : [];
+      const localEmails = new Set(localExisting.map((l) => l.email?.toLowerCase().trim()).filter(Boolean));
+      const localPhones = new Set(localExisting.map((l) => l.phone?.replace(/[^\d+]/g, '')).filter(Boolean));
+
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const checkRecords = generatedRows.map((r) => ({ email: r.email, phone: r.phone }));
+
+      const res = await fetch('/api/v1/data/imports/detect-duplicates', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ records: checkRecords }),
+      });
+
+      const dbDupEmails = new Set<string>();
+      const dbDupPhones = new Set<string>();
+
+      if (res.ok) {
+        const resData = await res.json();
+        const dupData = resData.data;
+        if (dupData) {
+          (dupData.duplicateEmails || []).forEach((e: string) => dbDupEmails.add(e.toLowerCase().trim()));
+          (dupData.duplicatePhones || []).forEach((p: string) => dbDupPhones.add(p.replace(/[^\d+]/g, '')));
+        }
+      }
+
+      generatedRows.forEach((r) => {
+        const emailClean = r.email?.toLowerCase().trim();
+        const phoneClean = r.phone?.replace(/[^\d+]/g, '');
+
+        if (
+          (emailClean && (dbDupEmails.has(emailClean) || localEmails.has(emailClean))) ||
+          (phoneClean && (dbDupPhones.has(phoneClean) || localPhones.has(phoneClean)))
+        ) {
+          r.isDuplicate = true;
+        }
+      });
+    } catch (err) {
       console.error('Failed to detect duplicates:', err);
+    }
+
+    setParsedRows(generatedRows);
+  };
+
+  // Step 1: File Upload Handler -> Directly Extract via Gemini & Feed Table
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setFilename(file.name);
+    setLoading(true);
+
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      let headers: string[] = ['Full Name', 'Email', 'Phone', 'Company Name', 'Title', 'Location'];
+      let rows: any[][] = [];
+      let rawText = '';
+      let extractedLeads: any[] = [];
+
+      if (ext === 'pdf' || fileType === 'pdf') {
+        setFileType('pdf');
+
+        // Extract PDF raw text via pdfjsLib
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+          const pdfDoc = await loadingTask.promise;
+
+          for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+            const page = await pdfDoc.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            textContent.items.forEach((item: any) => {
+              const str = (item.str || '').trim();
+              if (str) rawText += str + ' ';
+            });
+            rawText += '\n';
+          }
+        } catch (pdfErr) {
+          console.error('Client PDF raw text extraction failed:', pdfErr);
+        }
+
+        // Call backend Gemini AI Lead Extraction
+        extractedLeads = await extractLeadsWithGeminiAPI('pdf', rawText, headers, rows);
+      } else {
+        // Excel / CSV file extraction via SheetJS & Gemini
+        setFileType('excel');
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        rawText = XLSX.utils.sheet_to_csv(sheet);
+
+        const jsonRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (jsonRows.length > 0) {
+          headers = jsonRows[0].map((h: any) => String(h || '').trim());
+          rows = jsonRows.slice(1).filter((r) => r.some((cell) => cell !== null && cell !== ''));
+        }
+
+        // Call backend Gemini AI Lead Extraction
+        extractedLeads = await extractLeadsWithGeminiAPI('excel', rawText, headers, rows);
+      }
+
+      setRawHeaders(headers);
+      setRawRows(rows);
+
+      const mapping = await runGeminiAutoMap(headers);
+      setColumnMapping(mapping);
+
+      await processAndFeedGeminiLeads(extractedLeads, rows, headers, mapping);
+      setActiveStep(1); // Jump directly to Extracted Leads Table Preview!
+    } catch (err) {
+      console.error('Failed to parse upload file:', err);
+      alert('Failed to parse uploaded file. Please check file formatting.');
     } finally {
-      setParsedRows(generatedRows);
       setLoading(false);
-      setActiveStep(2);
     }
   };
 
-  // Inline Row Edit Controls
+  // Re-map headers dynamically when user changes dropdown mapping
+  const handleMappingChange = (header: string, targetField: string) => {
+    const updatedMapping = { ...columnMapping, [header]: targetField };
+    setColumnMapping(updatedMapping);
+    processAndFeedGeminiLeads([], rawRows, rawHeaders, updatedMapping);
+  };
+
+  // Inline Row Editing Controls
   const handleStartEditRow = (row: ParsedLeadRow) => {
     setEditingRowId(row.id);
     setEditRowState({ ...row });
@@ -323,7 +559,6 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
           const updated = { ...r, ...editRowState };
           const emailValid = !updated.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updated.email);
           updated.isValid = Boolean(updated.full_name && emailValid);
-          updated.validationError = !emailValid ? 'Invalid Email Format' : undefined;
           return updated;
         }
         return r;
@@ -336,7 +571,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
     setParsedRows((prev) => prev.filter((r) => r.id !== rowId));
   };
 
-  // Step 5: Confirm & Commit to PostgreSQL
+  // Commit Extracted Leads to PostgreSQL Database
   const handleCommitToPostgreSQL = async () => {
     setLoading(true);
     const validToImport = parsedRows.filter((r) => r.isValid && (!r.isDuplicate || deduplicationMode !== 'skip'));
@@ -394,7 +629,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
     }
 
     setLoading(false);
-    setActiveStep(4);
+    setActiveStep(2);
     onImportCompleted();
   };
 
@@ -439,7 +674,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
       </DialogTitle>
 
       <DialogContent dividers sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 3, '& .MuiStepLabel-label': { fontSize: '0.78rem' } }}>
+        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 3, '& .MuiStepLabel-label': { fontSize: '0.85rem' } }}>
           {STEPS.map((label) => (
             <Step key={label}>
               <StepLabel>{label}</StepLabel>
@@ -503,144 +738,84 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
           </Box>
         )}
 
-        {/* STEP 1: GEMINI AI COLUMN MAPPING */}
+        {/* STEP 1: EXTRACTED LEADS TABLE PREVIEW & GEMINI AI MAPPING */}
         {activeStep === 1 && (
-          <Box>
-            <Alert icon={<GeminiIcon fontSize="inherit" />} severity="info" sx={{ mb: 3 }}>
-              <strong>Gemini AI Column Recognition:</strong> Raw columns have been automatically recognized and mapped to the <strong>Standard Lead Schema</strong>. Review or customize mappings below.
+          <Box sx={{ py: 0.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert icon={<GeminiIcon fontSize="inherit" />} severity="success" sx={{ py: 0.5 }}>
+              ✨ <strong>Gemini AI Extracted {parsedRows.length} Lead Records</strong> from <strong>{filename}</strong> and populated the table below.
             </Alert>
 
-            <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-              <Table size="small">
-                <TableHead sx={{ bgcolor: 'action.hover' }}>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 700 }}>Uploaded File Column</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Gemini AI Recognized Lead Field</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
+            {/* Quick Metrics & Deduplication Controls */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Chip label={`Total: ${parsedRows.length}`} color="default" sx={{ fontWeight: 700 }} size="small" />
+                <Chip label={`Valid: ${validCount}`} color="success" sx={{ fontWeight: 700 }} size="small" />
+                {duplicateCount > 0 && <Chip label={`Duplicates: ${duplicateCount}`} color="warning" sx={{ fontWeight: 700 }} size="small" />}
+                {invalidCount > 0 && <Chip label={`Invalid: ${invalidCount}`} color="error" sx={{ fontWeight: 700 }} size="small" />}
+              </Box>
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>Duplicates:</Typography>
+                <Select
+                  size="small"
+                  value={deduplicationMode}
+                  onChange={(e) => setDeduplicationMode(e.target.value as any)}
+                  sx={{ height: 32, fontSize: '0.8rem' }}
+                >
+                  <MenuItem value="skip">Skip Duplicates</MenuItem>
+                  <MenuItem value="overwrite">Overwrite Existing</MenuItem>
+                  <MenuItem value="create">Import All as New</MenuItem>
+                </Select>
+              </Box>
+            </Box>
+
+            {/* Accordion for Gemini AI Header Mapping Verification */}
+            <Accordion variant="outlined" sx={{ borderRadius: 2 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <SettingsIcon fontSize="small" color="primary" /> Customize Gemini AI Header Mappings ({rawHeaders.length} Columns)
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 1.5 }}>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                   {rawHeaders.map((header) => (
-                    <TableRow key={header}>
-                      <TableCell sx={{ fontWeight: 600 }}>{header}</TableCell>
-                      <TableCell>
-                        <Select
-                          size="small"
-                          fullWidth
-                          value={columnMapping[header] || 'ignore'}
-                          onChange={(e) =>
-                            setColumnMapping({ ...columnMapping, [header]: e.target.value })
-                          }
-                        >
-                          {STANDARD_SCHEMA.map((opt) => (
-                            <MenuItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </TableCell>
-                    </TableRow>
+                    <Box key={header} sx={{ minWidth: 160, flex: '1 1 160px' }}>
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', fontWeight: 600 }}>
+                        {header}
+                      </Typography>
+                      <Select
+                        size="small"
+                        fullWidth
+                        value={columnMapping[header] || 'ignore'}
+                        onChange={(e) => handleMappingChange(header, e.target.value)}
+                        sx={{ height: 30, fontSize: '0.75rem' }}
+                      >
+                        {STANDARD_SCHEMA.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </Box>
                   ))}
-                </TableBody>
-              </Table>
-            </Paper>
-          </Box>
-        )}
+                </Box>
+              </AccordionDetails>
+            </Accordion>
 
-        {/* STEP 2: DEDUPLICATION SETTINGS */}
-        {activeStep === 2 && (
-          <Box sx={{ py: 2 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-              Deduplication & Matching Rules
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Select how LeadSphere should handle records that match existing PostgreSQL leads by Email or Phone number.
-            </Typography>
-
-            <Paper variant="outlined" sx={{ p: 3, borderRadius: 2, mb: 3 }}>
-              <RadioGroup
-                value={deduplicationMode}
-                onChange={(e) => setDeduplicationMode(e.target.value as any)}
-              >
-                <FormControlLabel
-                  value="skip"
-                  control={<Radio />}
-                  label={
-                    <Box>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                        Skip Duplicate Leads (Recommended)
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Ignore duplicate leads and import only new unique records.
-                      </Typography>
-                    </Box>
-                  }
-                  sx={{ mb: 2 }}
-                />
-                <FormControlLabel
-                  value="overwrite"
-                  control={<Radio />}
-                  label={
-                    <Box>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                        Overwrite / Update Existing Leads
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Update existing PostgreSQL lead fields with new imported values.
-                      </Typography>
-                    </Box>
-                  }
-                  sx={{ mb: 2 }}
-                />
-                <FormControlLabel
-                  value="create"
-                  control={<Radio />}
-                  label={
-                    <Box>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                        Import All (Allow Duplicates)
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Create new lead records for all rows regardless of existing matches.
-                      </Typography>
-                    </Box>
-                  }
-                />
-              </RadioGroup>
-            </Paper>
-
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Chip label={`Total Parsed: ${parsedRows.length}`} color="default" sx={{ fontWeight: 700 }} />
-              <Chip label={`Valid: ${validCount}`} color="success" sx={{ fontWeight: 700 }} />
-              <Chip label={`Duplicates Detected: ${duplicateCount}`} color="warning" sx={{ fontWeight: 700 }} />
-              {invalidCount > 0 && <Chip label={`Invalid Email/Format: ${invalidCount}`} color="error" sx={{ fontWeight: 700 }} />}
-            </Box>
-          </Box>
-        )}
-
-        {/* STEP 3: INTERACTIVE IMPORT PREVIEW (EDIT & REJECT) */}
-        {activeStep === 3 && (
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                Import Preview ({parsedRows.length} Records)
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Edit cells directly or click 🗑️ to reject individual rows before confirming import.
-              </Typography>
-            </Box>
-
-            <Paper variant="outlined" sx={{ maxHeight: 420, overflowY: 'auto', borderRadius: 2 }}>
+            {/* EXTRACTED LEADS TABLE */}
+            <Paper variant="outlined" sx={{ maxHeight: 340, overflowY: 'auto', borderRadius: 2 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 700, width: 60 }}>#</TableCell>
-                    <TableCell sx={{ fontWeight: 700, width: 110 }}>Validation</TableCell>
+                    <TableCell sx={{ fontWeight: 700, width: 40 }}>#</TableCell>
+                    <TableCell sx={{ fontWeight: 700, width: 90 }}>Status</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Full Name</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Email Address</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Phone</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Company</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Title</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
-                    <TableCell sx={{ fontWeight: 700, width: 90 }} align="center">Actions</TableCell>
+                    <TableCell sx={{ fontWeight: 700, width: 80 }} align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -652,11 +827,11 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
                         <TableCell sx={{ color: 'text.secondary' }}>{row.originalIndex}</TableCell>
                         <TableCell>
                           {row.isDuplicate ? (
-                            <Chip label="Duplicate" color="warning" size="small" sx={{ fontSize: '0.7rem', height: 20 }} />
+                            <Chip label="Duplicate" color="warning" size="small" sx={{ fontSize: '0.68rem', height: 20 }} />
                           ) : row.isValid ? (
-                            <Chip label="Valid" color="success" size="small" sx={{ fontSize: '0.7rem', height: 20 }} />
+                            <Chip label="Valid" color="success" size="small" sx={{ fontSize: '0.68rem', height: 20 }} />
                           ) : (
-                            <Chip label="Invalid" color="error" size="small" sx={{ fontSize: '0.7rem', height: 20 }} />
+                            <Chip label="Invalid" color="error" size="small" sx={{ fontSize: '0.68rem', height: 20 }} />
                           )}
                         </TableCell>
                         <TableCell>
@@ -707,6 +882,17 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
                           {isEdit ? (
                             <TextField
                               size="small"
+                              value={editRowState.title || ''}
+                              onChange={(e) => setEditRowState({ ...editRowState, title: e.target.value })}
+                            />
+                          ) : (
+                            row.title || '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isEdit ? (
+                            <TextField
+                              size="small"
                               value={editRowState.location || ''}
                               onChange={(e) => setEditRowState({ ...editRowState, location: e.target.value })}
                             />
@@ -744,24 +930,24 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
           </Box>
         )}
 
-        {/* STEP 4: SUMMARY & COMMIT RESULTS */}
-        {activeStep === 4 && (
+        {/* STEP 2: POSTGRESQL COMMIT RESULTS */}
+        {activeStep === 2 && (
           <Box sx={{ py: 4, textAlign: 'center' }}>
             <SuccessIcon sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
             <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
-              Bulk Lead Upload Completed Successfully!
+              Bulk Lead Extraction & Upload Completed!
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Your leads have been parsed, validated, and committed to PostgreSQL database.
+              Your leads have been extracted, validated, and saved to PostgreSQL database.
             </Typography>
 
             <Paper variant="outlined" sx={{ p: 3, maxWidth: 460, mx: 'auto', borderRadius: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-                <Typography variant="body2" color="text.secondary">Total Rows Processed:</Typography>
+                <Typography variant="body2" color="text.secondary">Total Records Extracted:</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{parsedRows.length}</Typography>
               </Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-                <Typography variant="body2" color="text.secondary">Successfully Committed to DB:</Typography>
+                <Typography variant="body2" color="text.secondary">Successfully Saved to DB:</Typography>
                 <Typography variant="body2" color="success.main" sx={{ fontWeight: 700 }}>
                   {commitResult?.successful_rows ?? validCount}
                 </Typography>
@@ -786,32 +972,14 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
 
         {activeStep === 1 && (
           <>
-            <Button onClick={() => setActiveStep(0)}>Back</Button>
-            <Button variant="contained" onClick={handleProceedToValidation} disabled={loading}>
-              Next: Run Validation & Deduplication
-            </Button>
-          </>
-        )}
-
-        {activeStep === 2 && (
-          <>
-            <Button onClick={() => setActiveStep(1)}>Back</Button>
-            <Button variant="contained" onClick={() => setActiveStep(3)}>
-              Next: Review & Edit Preview
-            </Button>
-          </>
-        )}
-
-        {activeStep === 3 && (
-          <>
-            <Button onClick={() => setActiveStep(2)}>Back</Button>
+            <Button onClick={() => setActiveStep(0)}>Re-upload File</Button>
             <Button variant="contained" color="success" onClick={handleCommitToPostgreSQL} disabled={loading}>
               {loading ? <CircularProgress size={24} /> : 'Confirm & Commit to PostgreSQL'}
             </Button>
           </>
         )}
 
-        {activeStep === 4 && (
+        {activeStep === 2 && (
           <Button variant="contained" onClick={handleReset}>
             Done & View Leads
           </Button>

@@ -59,6 +59,26 @@ export class ImportExportController {
     return { data: mapping };
   }
 
+  @Post('imports/gemini-extract')
+  @RequirePermission('leads.create')
+  async geminiExtract(
+    @Body()
+    body: {
+      fileType: 'pdf' | 'excel';
+      rawContent?: string;
+      headers?: string[];
+      rows?: any[][];
+    },
+  ) {
+    const leads = await this.importExportService.extractLeadsWithGemini(
+      body.fileType || 'excel',
+      body.rawContent || '',
+      body.headers,
+      body.rows,
+    );
+    return { data: leads };
+  }
+
   @Post('imports/detect-duplicates')
   @RequirePermission('leads.create')
   async detectDuplicates(
