@@ -9,6 +9,7 @@ import {
   InputAdornment,
   Avatar,
   IconButton,
+  Stack,
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import {
@@ -21,6 +22,8 @@ import {
 } from '@mui/icons-material';
 import { LeadFormDrawer } from '../components/LeadFormDrawer';
 import { LeadDetailDialog } from '../components/LeadDetailDialog';
+import { BulkImportWizardDialog } from '../components/BulkImportWizardDialog';
+import { UploadFile as UploadIcon } from '@mui/icons-material';
 
 interface LeadRecord {
   id: string;
@@ -45,6 +48,7 @@ export const LeadsPage: React.FC = () => {
   const [leads, setLeads] = useState<LeadRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
@@ -251,14 +255,24 @@ export const LeadsPage: React.FC = () => {
             Manage your lead repository, dynamic attributes, score tracking, and 360° timelines.
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setDrawerOpen(true)}
-          sx={{ py: 1 }}
-        >
-          Add New Lead
-        </Button>
+        <Stack direction="row" spacing={2}>
+          <Button
+            variant="outlined"
+            startIcon={<UploadIcon />}
+            onClick={() => setBulkImportOpen(true)}
+            sx={{ py: 1 }}
+          >
+            Import Leads (Excel / PDF)
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setDrawerOpen(true)}
+            sx={{ py: 1 }}
+          >
+            Add New Lead
+          </Button>
+        </Stack>
       </Box>
 
       <Box sx={{ mb: 3, display: 'flex', gap: 2 }}>
@@ -297,6 +311,15 @@ export const LeadsPage: React.FC = () => {
         onClose={() => setDrawerOpen(false)}
         onSaved={() => {
           setDrawerOpen(false);
+          fetchLeads();
+        }}
+      />
+
+      <BulkImportWizardDialog
+        open={bulkImportOpen}
+        onClose={() => setBulkImportOpen(false)}
+        onImportCompleted={() => {
+          setBulkImportOpen(false);
           fetchLeads();
         }}
       />

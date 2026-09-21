@@ -59,6 +59,37 @@ export class ImportExportController {
     return { data: mapping };
   }
 
+  @Post('imports/detect-duplicates')
+  @RequirePermission('leads.create')
+  async detectDuplicates(
+    @TenantContext() ctx: ITenantContext,
+    @Body('records') records: Array<{ email?: string; phone?: string }>,
+  ) {
+    const result = await this.importExportService.detectDuplicates(ctx.tenantId, records || []);
+    return { data: result };
+  }
+
+  @Post('imports/commit-bulk')
+  @RequirePermission('leads.create')
+  async commitBulk(
+    @TenantContext() ctx: ITenantContext,
+    @Body()
+    body: {
+      filename: string;
+      leads: any[];
+      deduplicationMode?: 'skip' | 'overwrite' | 'create';
+    },
+  ) {
+    const result = await this.importExportService.commitBulkLeads(
+      ctx.tenantId,
+      ctx.userId,
+      body.filename || 'bulk_import.xlsx',
+      body.leads || [],
+      body.deduplicationMode || 'skip',
+    );
+    return { data: result };
+  }
+
   @Post('imports')
   @RequirePermission('leads.create')
   async processImport(

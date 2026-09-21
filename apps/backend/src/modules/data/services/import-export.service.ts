@@ -15,22 +15,37 @@ const HEADER_SYNONYMS: Record<string, string> = {
   'last_name': 'last_name',
   'lastname': 'last_name',
   'lname': 'last_name',
+  'surname': 'last_name',
   'email': 'email',
   'e-mail': 'email',
   'mail': 'email',
   'email_address': 'email',
+  'contact_email': 'email',
   'phone': 'phone',
   'phone_number': 'phone',
   'mobile': 'phone',
   'cell': 'phone',
+  'contact': 'phone',
   'company': 'company_name',
   'company_name': 'company_name',
   'organization': 'company_name',
   'org': 'company_name',
-  'title': 'designation',
-  'designation': 'designation',
-  'job_title': 'designation',
-  'position': 'designation',
+  'title': 'title',
+  'designation': 'title',
+  'job_title': 'title',
+  'position': 'title',
+  'role': 'title',
+  'location': 'location',
+  'city': 'location',
+  'address': 'location',
+  'place': 'location',
+  'state': 'location',
+  'country': 'location',
+  'industry': 'industry',
+  'category': 'industry',
+  'sector': 'industry',
+  'status': 'status',
+  'stage': 'status',
 };
 
 @Injectable()
@@ -449,5 +464,160 @@ export class ImportExportService {
     }
     values.push(current.replace(/^"|"$/g, ''));
     return values;
+  }
+
+  async detectDuplicates(
+    tenantId: string,
+    records: Array<{ email?: string; phone?: string }>,
+  ): Promise<{ duplicateEmails: string[]; duplicatePhones: string[] }> {
+    const existing = await this.leadRepository.find({
+      where: { tenant_id: tenantId },
+      select: ['email', 'phone'],
+    });
+
+    const existingEmails = new Set(
+      existing.map((l) => l.email?.toLowerCase().trim()).filter(Boolean),
+    );
+    const existingPhones = new Set(
+      existing.map((l) => l.phone?.replace(/[^\d+]/g, '')).filter(Boolean),
+    );
+
+    const duplicateEmails: string[] = [];
+    const duplicatePhones: string[] = [];
+
+    records.forEach((r) => {
+      const emailClean = r.email?.toLowerCase().trim();
+      const phoneClean = r.phone?.replace(/[^\d+]/g, '');
+
+      if (emailClean && existingEmails.has(emailClean)) {
+        duplicateEmails.push(emailClean);
+      }
+      if (phoneClean && existingPhones.has(phoneClean)) {
+        duplicatePhones.push(phoneClean);
+      }
+    });
+
+    return {
+      duplicateEmails: Array.from(new Set(duplicateEmails)),
+      duplicatePhones: Array.from(new Set(duplicatePhones)),
+    };
+  }
+
+  async commitBulkLeads(
+    tenantId: string,
+    userId: string,
+    filename: string,
+    leadsData: any[],
+    deduplicationMode: 'skip' | 'overwrite' | 'create' = 'skip',
+  ) {
+    const importJob = this.importJobRepository.create({
+      tenant_id: tenantId,
+      created_by: userId,
+      filename,
+      total_rows: leadsData.length,
+      status: ImportStatus.PROCESSING,
+      column_mapping: {},
+      error_log: [],
+    });
+    await this.importJobRepository.save(importJob);
+
+    let successCount = 0;
+    let failCount = 0;
+    let dupCount = 0;
+    const errorLog: Array<{ row: number; email?: string; reason: string }> = [];
+
+    const existingLeads = await this.leadRepository.find({
+      where: { tenant_id: tenantId },
+    });
+    const emailMap = new Map<string, Lead>();
+    const phoneMap = new Map<string, Lead>();
+
+    existingLeads.forEach((l) => {
+      if (l.email) emailMap.set(l.email.toLowerCase().trim(), l);
+      if (l.phone) phoneMap.set(l.phone.replace(/[^\d+]/g, ''), l);
+    });
+
+    const savedLeads: Lead[] = [];
+
+    for (let i = 0; i < leadsData.length; i++) {
+      const row = leadsData[i];
+      const fullName = row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unnamed Lead';
+      const nameParts = fullName.split(' ');
+      const firstName = row.first_name || nameParts[0] || 'Lead';
+      const lastName = row.last_name || nameParts.slice(1).join(' ') || '';
+      const email = row.email ? row.email.toLowerCase().trim() : undefined;
+      const phone = row.phone ? String(row.phone).trim() : undefined;
+      const phoneE164 = phone ? phone.replace(/[^\d+]/g, '') : undefined;
+      const companyName = row.company_name || row.company || undefined;
+      const title = row.title || row.designation || undefined;
+      const location = row.location || row.city || undefined;
+      const industry = row.industry || undefined;
+      const status = row.status || 'New';
+      const custom = row.custom || {};
+
+      let existingLead: Lead | undefined;
+      if (email && emailMap.has(email)) existingLead = emailMap.get(email);
+      else if (phoneE164 && phoneMap.has(phoneE164)) existingLead = phoneMap.get(phoneE164);
+
+      if (existingLead) {
+        dupCount++;
+        if (deduplicationMode === 'skip') {
+          continue;
+        } else if (deduplicationMode === 'overwrite') {
+          existingLead.first_name = firstName;
+          existingLead.last_name = lastName;
+          existingLead.full_name = fullName;
+          if (companyName) existingLead.company_name = companyName;
+          if (title) existingLead.designation = title;
+          if (location) existingLead.location = location;
+          if (industry) existingLead.industry = industry;
+          existingLead.custom = { ...(existingLead.custom || {}), ...custom };
+
+          const updated = await this.leadRepository.save(existingLead);
+          savedLeads.push(updated);
+          successCount++;
+          continue;
+        }
+      }
+
+      try {
+        const lead = this.leadRepository.create({
+          tenant_id: tenantId,
+          first_name: firstName,
+          last_name: lastName,
+          full_name: fullName,
+          company_name: companyName,
+          designation: title,
+          email,
+          email_normalized: email,
+          phone,
+          phone_e164: phoneE164,
+          location,
+          industry,
+          lead_score: 50,
+          custom: { ...custom, location, industry },
+        });
+
+        const saved = await this.leadRepository.save(lead);
+        if (email) emailMap.set(email, saved);
+        if (phoneE164) phoneMap.set(phoneE164, saved);
+        savedLeads.push(saved);
+        successCount++;
+      } catch (err: any) {
+        failCount++;
+        errorLog.push({ row: i + 1, email, reason: err.message || 'Validation error' });
+      }
+    }
+
+    importJob.processed_rows = leadsData.length;
+    importJob.successful_rows = successCount;
+    importJob.failed_rows = failCount;
+    importJob.duplicate_rows = dupCount;
+    importJob.status = ImportStatus.COMPLETED;
+    importJob.error_log = errorLog;
+
+    await this.importJobRepository.save(importJob);
+
+    return { importJob, savedLeads };
   }
 }
