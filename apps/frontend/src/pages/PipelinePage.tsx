@@ -3,20 +3,17 @@ import {
   Box,
   Typography,
   Button,
-  Grid,
   Card,
   CardContent,
   Chip,
   IconButton,
   TextField,
   InputAdornment,
-  Avatar,
   Paper,
   CircularProgress,
   Menu,
   MenuItem,
   Stack,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -26,8 +23,6 @@ import {
 import {
   Add as AddIcon,
   Search as SearchIcon,
-  MoreVert as MoreVertIcon,
-  AttachMoney as MoneyIcon,
   Star as ScoreIcon,
   ViewColumn as KanbanIcon,
   ArrowForward as MoveIcon,
@@ -52,17 +47,27 @@ interface Lead {
   email?: string;
   company_name?: string;
   title?: string;
+  designation?: string;
   status: string;
   stage_id?: string;
   score: number;
 }
 
+const DEFAULT_STAGES: Stage[] = [
+  { id: 'stage_new', name: 'New / Lead In', color: '#3b82f6', position: 1, probability: 10 },
+  { id: 'stage_contacted', name: 'Contacted', color: '#8b5cf6', position: 2, probability: 30 },
+  { id: 'stage_interested', name: 'Interested / Proposal', color: '#f59e0b', position: 3, probability: 60 },
+  { id: 'stage_negotiation', name: 'Negotiation', color: '#ec4899', position: 4, probability: 80 },
+  { id: 'stage_won', name: 'Closed Won', color: '#10b981', position: 5, probability: 100, is_won: true },
+  { id: 'stage_lost', name: 'Closed Lost', color: '#ef4444', position: 6, probability: 0, is_lost: true },
+];
+
 export const PipelinePage: React.FC = () => {
-  const [stages, setStages] = useState<Stage[]>([]);
+  const [stages, setStages] = useState<Stage[]>(DEFAULT_STAGES);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Drawers & Modals state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -78,31 +83,80 @@ export const PipelinePage: React.FC = () => {
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [activeLeadForMove, setActiveLeadForMove] = useState<Lead | null>(null);
 
+  const getStorageKey = () => {
+    try {
+      const storedTenant = localStorage.getItem('tenant');
+      if (storedTenant) {
+        const parsed = JSON.parse(storedTenant);
+        const tId = parsed.id || parsed.slug;
+        if (tId) return `leads_${tId}`;
+      }
+    } catch (e) {}
+    return 'leads_default';
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
     setLoading(true);
+    let currentStages: Stage[] = DEFAULT_STAGES;
+    let currentLeads: Lead[] = [];
+
+    // 1. Read local storage first for reliable offline & cached lead display
+    const key = getStorageKey();
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        currentLeads = parsed.map((l: any) => ({
+          ...l,
+          first_name: l.first_name || l.full_name?.split(' ')[0] || 'Lead',
+          last_name: l.last_name || l.full_name?.split(' ').slice(1).join(' ') || '',
+          score: l.score || l.lead_score || 0,
+          title: l.title || l.designation || '',
+          status: l.status || 'New',
+        }));
+      } catch (e) {}
+    }
+
+    // 2. Fetch fresh stages & leads from backend API if available
     try {
       const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      // Fetch stages
       const stagesRes = await fetch('/api/v1/pipeline/stages', { headers });
-      const stagesData = await stagesRes.json();
-      const fetchedStages: Stage[] = stagesData.data || [];
+      if (stagesRes.ok) {
+        const stagesData = await stagesRes.json();
+        if (stagesData.data && Array.isArray(stagesData.data) && stagesData.data.length > 0) {
+          currentStages = stagesData.data;
+        }
+      }
 
-      // Fetch leads
       const leadsRes = await fetch('/api/v1/leads?limit=100', { headers });
-      const leadsData = await leadsRes.json();
-      const fetchedLeads: Lead[] = leadsData.data || [];
+      if (leadsRes.ok) {
+        const leadsData = await leadsRes.json();
+        if (leadsData.data && Array.isArray(leadsData.data)) {
+          const apiLeads = leadsData.data.map((l: any) => ({
+            ...l,
+            first_name: l.first_name || l.full_name?.split(' ')[0] || 'Lead',
+            last_name: l.last_name || l.full_name?.split(' ').slice(1).join(' ') || '',
+            score: l.score || l.lead_score || 0,
+            title: l.title || l.designation || '',
+            status: l.status || 'New',
+          }));
 
-      setStages(fetchedStages);
-      setLeads(fetchedLeads);
+          const apiIds = new Set(apiLeads.map((b: any) => b.id));
+          const extraLocal = currentLeads.filter((l) => !apiIds.has(l.id));
+          currentLeads = [...extraLocal, ...apiLeads];
+        }
+      }
     } catch (err) {
-      console.error('Failed to fetch pipeline data:', err);
+      console.error('Failed to fetch pipeline data from backend:', err);
     } finally {
+      setStages(currentStages);
+      setLeads(currentLeads);
       setLoading(false);
     }
   };
@@ -112,47 +166,77 @@ export const PipelinePage: React.FC = () => {
     if (!newStageName.trim()) return;
 
     setCreatingStage(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/v1/pipeline/stages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: newStageName.trim(), color: newStageColor }),
-      });
+    const newStageObj: Stage = {
+      id: `stage_${Date.now()}`,
+      name: newStageName.trim(),
+      color: newStageColor || '#3b82f6',
+      position: stages.length + 1,
+      probability: 50,
+    };
 
-      if (res.ok) {
-        setIsStageDialogOpen(false);
-        setNewStageName('');
-        fetchData();
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      if (token) {
+        await fetch('/api/v1/pipeline/stages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ name: newStageName.trim(), color: newStageColor }),
+        });
       }
     } catch (err) {
-      console.error('Failed to create stage:', err);
-    } finally {
-      setCreatingStage(false);
+      console.error('Failed to create stage backend:', err);
     }
+
+    setStages((prev) => [...prev, newStageObj]);
+    setIsStageDialogOpen(false);
+    setNewStageName('');
+    setCreatingStage(false);
   };
 
-  const handleMoveStage = async (leadId: string, stageId: string) => {
+  const handleMoveStage = async (leadId: string, targetStage: Stage) => {
     setMenuAnchorEl(null);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/v1/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ stage_id: stageId }),
-      });
 
-      if (res.ok) {
-        fetchData();
+    let newStatus = 'New';
+    const stageNameStr = targetStage.name.toLowerCase();
+    if (stageNameStr.includes('contact')) newStatus = 'Contacted';
+    else if (stageNameStr.includes('interest') || stageNameStr.includes('propos')) newStatus = 'Interested';
+    else if (stageNameStr.includes('negotiat')) newStatus = 'Proposal';
+    else if (stageNameStr.includes('won')) newStatus = 'Closed Won';
+    else if (stageNameStr.includes('lost')) newStatus = 'Closed Lost';
+
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? { ...l, stage_id: targetStage.id, status: newStatus } : l)),
+    );
+
+    try {
+      const key = getStorageKey();
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        let list = JSON.parse(stored);
+        list = list.map((l: any) =>
+          String(l.id) === String(leadId) ? { ...l, stage_id: targetStage.id, status: newStatus } : l,
+        );
+        localStorage.setItem(key, JSON.stringify(list));
+      }
+    } catch (e) {}
+
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      if (token && !leadId.startsWith('lead_')) {
+        await fetch(`/api/v1/leads/${leadId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ stage_id: targetStage.id, status: newStatus }),
+        });
       }
     } catch (err) {
-      console.error('Failed to move lead stage:', err);
+      console.error('Failed to move lead stage on backend:', err);
     }
   };
 
@@ -168,11 +252,46 @@ export const PipelinePage: React.FC = () => {
   };
 
   const filteredLeads = leads.filter((lead) => {
-    const fullName = `${lead.first_name} ${lead.last_name}`.toLowerCase();
+    const fullName = `${lead.first_name || ''} ${lead.last_name || ''}`.toLowerCase();
     const company = (lead.company_name || '').toLowerCase();
     const query = searchQuery.toLowerCase();
     return fullName.includes(query) || company.includes(query);
   });
+
+  const getStageLeads = (stage: Stage) => {
+    return filteredLeads.filter((l) => {
+      if (l.stage_id && l.stage_id === stage.id) return true;
+
+      const statusStr = (l.status || '').toLowerCase();
+      const stageNameStr = (stage.name || '').toLowerCase();
+
+      if (stageNameStr.includes('new') || stageNameStr.includes('lead in')) {
+        return statusStr === 'new' || !l.status || statusStr === 'default';
+      }
+      if (stageNameStr.includes('contact')) {
+        return statusStr === 'contacted';
+      }
+      if (stageNameStr.includes('interest') || stageNameStr.includes('propos')) {
+        return statusStr === 'interested' || statusStr === 'proposal';
+      }
+      if (stageNameStr.includes('negotiat')) {
+        return statusStr === 'proposal' || statusStr === 'negotiation';
+      }
+      if (stageNameStr.includes('won')) {
+        return statusStr === 'closed won' || statusStr === 'won';
+      }
+      if (stageNameStr.includes('lost')) {
+        return statusStr === 'closed lost' || statusStr === 'lost';
+      }
+
+      // If no explicit match and first stage, assign remaining default leads
+      if (stage.position === 1 && !l.stage_id && !['contacted', 'interested', 'proposal', 'closed won', 'closed lost'].includes(statusStr)) {
+        return true;
+      }
+
+      return false;
+    });
+  };
 
   const getScoreColor = (score: number = 0) => {
     if (score >= 70) return 'success';
@@ -244,18 +363,14 @@ export const PipelinePage: React.FC = () => {
           }}
         >
           {stages.map((stage) => {
-            const stageLeads = filteredLeads.filter((l) => {
-              if (l.stage_id) return l.stage_id === stage.id;
-              // default to first stage if no stage_id
-              return stage.position === 1;
-            });
+            const stageLeads = getStageLeads(stage);
 
             return (
               <Paper
                 key={stage.id}
                 variant="outlined"
                 sx={{
-                  minWidth: 300,
+                  minWidth: 280,
                   maxWidth: 320,
                   bgcolor: 'action.hover',
                   borderRadius: 2,
@@ -274,7 +389,7 @@ export const PipelinePage: React.FC = () => {
                     borderRadius: '8px 8px 0 0',
                     display: 'flex',
                     alignItems: 'center',
-                    justify: 'space-between',
+                    justifyContent: 'space-between',
                   }}
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -338,7 +453,7 @@ export const PipelinePage: React.FC = () => {
 
                           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
                             {lead.company_name ? `${lead.company_name} ` : ''}
-                            {lead.title ? `• ${lead.title}` : ''}
+                            {lead.title || lead.designation ? `• ${lead.title || lead.designation}` : ''}
                           </Typography>
 
                           <Divider sx={{ my: 1 }} />
@@ -375,7 +490,7 @@ export const PipelinePage: React.FC = () => {
         {stages.map((stg) => (
           <MenuItem
             key={stg.id}
-            onClick={() => activeLeadForMove && handleMoveStage(activeLeadForMove.id, stg.id)}
+            onClick={() => activeLeadForMove && handleMoveStage(activeLeadForMove.id, stg)}
             disabled={activeLeadForMove?.stage_id === stg.id}
           >
             <Box
