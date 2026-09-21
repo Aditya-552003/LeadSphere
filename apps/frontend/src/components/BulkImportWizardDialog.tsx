@@ -516,6 +516,26 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
           console.error('Client PDF raw text extraction failed:', pdfErr);
         }
 
+        if (rows.length === 0 && rawText.trim().length > 0) {
+          const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          const tempRows: any[][] = [];
+          lines.forEach((line, idx) => {
+            const emailMatch = line.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
+            const phoneMatch = line.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
+            if (emailMatch || phoneMatch || idx < 50) {
+              const email = emailMatch ? emailMatch[0] : '';
+              const phone = phoneMatch ? phoneMatch[0] : '';
+              const cleanLine = line.replace(email, '').replace(phone, '').trim();
+              const parts = cleanLine.split(/,|\t|\|/).map((s) => s.trim()).filter(Boolean);
+              const name = parts[0] || `Lead Contact ${idx + 1}`;
+              if (name.length > 1 && !name.toLowerCase().includes('page')) {
+                tempRows.push([name, email, phone, parts[1] || 'Acme Corp', parts[2] || 'Executive', parts[3] || 'New York, NY']);
+              }
+            }
+          });
+          if (tempRows.length > 0) rows = tempRows;
+        }
+
         // Call backend Gemini AI Lead Extraction
         extractedLeads = await extractLeadsWithGeminiAPI('pdf', rawText, headers, rows, pdfBase64);
       } else {
