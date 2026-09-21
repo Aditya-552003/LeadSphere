@@ -502,38 +502,66 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
 
           const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
           const pdfDoc = await loadingTask.promise;
+          const extractedPdfRows: any[][] = [];
 
           for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
             const page = await pdfDoc.getPage(pageNum);
             const textContent = await page.getTextContent();
+
+            // Group text items by Y coordinate (row in PDF)
+            const lineMap: { [y: number]: { x: number; text: string }[] } = {};
             textContent.items.forEach((item: any) => {
               const str = (item.str || '').trim();
-              if (str) rawText += str + ' ';
+              if (!str) return;
+              const y = Math.round(item.transform[5]); // Y coordinate
+              const x = Math.round(item.transform[4]); // X coordinate
+
+              const lineKey = Object.keys(lineMap).find((k) => Math.abs(Number(k) - y) < 4);
+              const targetKey = lineKey ? Number(lineKey) : y;
+              if (!lineMap[targetKey]) lineMap[targetKey] = [];
+              lineMap[targetKey].push({ x, text: str });
             });
-            rawText += '\n';
+
+            // Sort Y descending (top of page to bottom)
+            const sortedY = Object.keys(lineMap)
+              .map(Number)
+              .sort((a, b) => b - a);
+
+            sortedY.forEach((y) => {
+              // Sort items in line by X ascending (left to right)
+              lineMap[y].sort((a, b) => a.x - b.x);
+              const lineTokens = lineMap[y].map((item) => item.text);
+              const lineStr = lineTokens.join('\t');
+              rawText += lineStr + '\n';
+
+              const lineFull = lineTokens.join(' ');
+              const emailMatch = lineFull.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/i);
+              const phoneMatch = lineFull.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
+
+              if (emailMatch || phoneMatch) {
+                const email = emailMatch ? emailMatch[0] : '';
+                const phone = phoneMatch ? phoneMatch[0] : '';
+
+                // Filter out email and phone from text tokens
+                const cleanTokens = lineTokens.filter(
+                  (t) => t !== email && t !== phone && !/^\d+$/.test(t)
+                );
+
+                const name = cleanTokens[0] || 'Lead Contact';
+                const company = cleanTokens[1] || cleanTokens.slice(1).join(' ') || 'N/A';
+                const title = cleanTokens[2] || 'Executive';
+                const location = cleanTokens[3] || '';
+
+                extractedPdfRows.push([name, email, phone, company, title, location]);
+              }
+            });
+          }
+
+          if (extractedPdfRows.length > 0) {
+            rows = extractedPdfRows;
           }
         } catch (pdfErr) {
           console.error('Client PDF raw text extraction failed:', pdfErr);
-        }
-
-        if (rows.length === 0 && rawText.trim().length > 0) {
-          const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-          const tempRows: any[][] = [];
-          lines.forEach((line, idx) => {
-            const emailMatch = line.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
-            const phoneMatch = line.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
-            if (emailMatch || phoneMatch || idx < 50) {
-              const email = emailMatch ? emailMatch[0] : '';
-              const phone = phoneMatch ? phoneMatch[0] : '';
-              const cleanLine = line.replace(email, '').replace(phone, '').trim();
-              const parts = cleanLine.split(/,|\t|\|/).map((s) => s.trim()).filter(Boolean);
-              const name = parts[0] || `Lead Contact ${idx + 1}`;
-              if (name.length > 1 && !name.toLowerCase().includes('page')) {
-                tempRows.push([name, email, phone, parts[1] || 'Acme Corp', parts[2] || 'Executive', parts[3] || 'New York, NY']);
-              }
-            }
-          });
-          if (tempRows.length > 0) rows = tempRows;
         }
 
         // Call backend Gemini AI Lead Extraction

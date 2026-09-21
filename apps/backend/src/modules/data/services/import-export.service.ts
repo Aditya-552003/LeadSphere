@@ -650,20 +650,18 @@ export class ImportExportService {
     if (apiKey) {
       try {
         const promptText = `You are an expert Sales Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document content/file and extract ALL individual contact/lead records.
-Return ONLY a valid JSON array of objects without markdown formatting or introductory text.
-Each object MUST contain the following properties:
-- full_name: Full name of the contact person
-- first_name: First name
-- last_name: Last name
-- email: Email address
-- phone: Phone number
-- company_name: Company or organization name
-- title: Job title or designation
-- location: City, state, or country
-- industry: Industry sector
-- status: Default to "New"
+CRITICAL FORMAT INSTRUCTIONS:
+- Each contact/person MUST be a SEPARATE object in the JSON array. Do NOT combine multiple contacts or lines into one object.
+- "full_name": Only the person's name (e.g., "Raj Prasad Maurya"). Do NOT include email address, phone, or company in full_name.
+- "email": Contact's email address (e.g., "hchandra904@gmail.com").
+- "phone": Contact's phone number (e.g., "+919838107135").
+- "company_name": Company or organization name (e.g., "M/S RAJ MACHINERY CO.").
+- "title": Job title or designation.
+- "location": City, state, or country (e.g., "Prayagraj").
+- "industry": Industry sector.
+- "status": Default to "New".
 
-Make sure every single contact in the document is extracted into the JSON array.`;
+Return ONLY a valid JSON array of objects without markdown fences or explanations.`;
 
         const parts: any[] = [{ text: promptText }];
 
@@ -754,12 +752,31 @@ Make sure every single contact in the document is extracted into the JSON array.
     if (rawItems.length === 0) return [];
 
     return rawItems.map((item) => {
-      const fullName =
-        item.full_name || item.name || item.contact_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Lead Contact';
+      let email = item.email || item.email_address || item.mail || '';
+      let phone = item.phone || item.phone_number || item.mobile || item.contact || '';
+      let rawName = item.full_name || item.name || item.contact_name || `${item.first_name || ''} ${item.last_name || ''}`.trim();
+
+      if (!email && rawName) {
+        const foundEmail = rawName.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
+        if (foundEmail) {
+          email = foundEmail[0];
+          rawName = rawName.replace(email, '').trim();
+        }
+      }
+
+      if (!phone && rawName) {
+        const foundPhone = rawName.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
+        if (foundPhone) {
+          phone = foundPhone[0];
+          rawName = rawName.replace(phone, '').trim();
+        }
+      }
+
+      // Clean leading index numbers like "1 ", "00 "
+      rawName = rawName.replace(/^\d+\s+/, '').trim();
+      const fullName = rawName || 'Lead Contact';
       const firstName = item.first_name || fullName.split(' ')[0] || 'Lead';
       const lastName = item.last_name || fullName.split(' ').slice(1).join(' ') || '';
-      const email = item.email || item.email_address || item.mail || '';
-      const phone = item.phone || item.phone_number || item.mobile || item.contact || '';
       const company = item.company_name || item.company || item.organization || item.org || '';
       const title = item.title || item.designation || item.job_title || item.role || item.position || '';
       const location = item.location || item.city || item.address || '';
