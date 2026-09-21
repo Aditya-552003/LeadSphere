@@ -285,6 +285,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
     content: string,
     headers?: string[],
     rows?: any[][],
+    pdfBase64?: string,
   ): Promise<any[]> => {
     try {
       const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
@@ -299,6 +300,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
           rawContent: content,
           headers,
           rows,
+          pdfBase64,
         }),
       });
 
@@ -482,10 +484,18 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
 
       if (ext === 'pdf' || fileType === 'pdf') {
         setFileType('pdf');
+        let pdfBase64 = '';
 
-        // Extract PDF raw text via pdfjsLib
+        // Extract PDF base64 & raw text
         try {
           const arrayBuffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = '';
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          pdfBase64 = btoa(binary);
+
           const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
           const pdfDoc = await loadingTask.promise;
 
@@ -503,7 +513,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
         }
 
         // Call backend Gemini AI Lead Extraction
-        extractedLeads = await extractLeadsWithGeminiAPI('pdf', rawText, headers, rows);
+        extractedLeads = await extractLeadsWithGeminiAPI('pdf', rawText, headers, rows, pdfBase64);
       } else {
         // Excel / CSV file extraction via SheetJS & Gemini
         setFileType('excel');

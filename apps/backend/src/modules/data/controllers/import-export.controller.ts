@@ -68,6 +68,7 @@ export class ImportExportController {
       rawContent?: string;
       headers?: string[];
       rows?: any[][];
+      pdfBase64?: string;
     },
   ) {
     const leads = await this.importExportService.extractLeadsWithGemini(
@@ -75,6 +76,7 @@ export class ImportExportController {
       body.rawContent || '',
       body.headers,
       body.rows,
+      body.pdfBase64,
     );
     return { data: leads };
   }

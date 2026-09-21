@@ -626,6 +626,7 @@ export class ImportExportService {
     rawContent: string,
     headers?: string[],
     rows?: any[][],
+    pdfBase64?: string,
   ): Promise<Array<{
     full_name: string;
     first_name: string;
@@ -646,61 +647,86 @@ export class ImportExportService {
       contentToAnalyze = `Headers: ${headers.join(', ')}\n` + rows.map((r) => r.join(', ')).join('\n');
     }
 
-    if (apiKey && contentToAnalyze.trim().length > 0) {
+    if (apiKey) {
       try {
-        const prompt = `You are an expert Lead Extraction AI. Analyze the following raw ${fileType.toUpperCase()} content and extract all lead/contact records.
-Return ONLY a valid JSON array of objects without markdown formatting or code blocks.
-Each object must have the following string properties:
-- full_name
-- first_name
-- last_name
-- email
-- phone
-- company_name
-- title
-- location
-- industry
-- status (default "New")
+        const promptText = `You are an expert Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document/content and extract all lead/contact records.
+Return ONLY a valid JSON array of objects with the following string properties:
+- full_name: Full name of contact
+- first_name: First name
+- last_name: Last name
+- email: Email address
+- phone: Phone number
+- company_name: Company or organization name
+- title: Job title or designation
+- location: City/State/Country
+- industry: Industry sector
+- status: Default to "New"
 
-Content:
-${contentToAnalyze.substring(0, 15000)}`;
+Make sure every contact in the document is extracted into the JSON array.`;
 
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: { response_mime_type: 'application/json' },
-            }),
-          },
-        );
+        const parts: any[] = [{ text: promptText }];
 
-        if (response.ok) {
-          const resData: any = await response.json();
-          const candidateText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidateText) {
-            const cleanText = candidateText.replace(/```json/gi, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(cleanText);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              return parsed.map((item) => ({
-                full_name: item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Lead Contact',
-                first_name: item.first_name || item.full_name?.split(' ')[0] || 'Lead',
-                last_name: item.last_name || item.full_name?.split(' ').slice(1).join(' ') || '',
-                email: item.email || '',
-                phone: item.phone || '',
-                company_name: item.company_name || item.company || '',
-                title: item.title || item.designation || '',
-                location: item.location || item.city || '',
-                industry: item.industry || 'Technology & SaaS',
-                status: item.status || 'New',
-              }));
+        if (pdfBase64 && fileType === 'pdf') {
+          // Send PDF binary natively to Gemini Multimodal 1.5 Flash API!
+          parts.push({
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: pdfBase64,
+            },
+          });
+        } else if (contentToAnalyze.trim().length > 0) {
+          parts.push({ text: `Source Content:\n${contentToAnalyze.substring(0, 30000)}` });
+        }
+
+        if (parts.length > 1) {
+          const modelsToTry = Array.from(
+            new Set([process.env.GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']),
+          ).filter(Boolean) as string[];
+
+          for (const targetModel of modelsToTry) {
+            try {
+              const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts }],
+                  }),
+                },
+              );
+
+              if (response.ok) {
+                const resData: any = await response.json();
+                const candidateText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (candidateText) {
+                  const cleanText = candidateText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                  const parsed = JSON.parse(cleanText);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed.map((item) => ({
+                      full_name: item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Lead Contact',
+                      first_name: item.first_name || item.full_name?.split(' ')[0] || 'Lead',
+                      last_name: item.last_name || item.full_name?.split(' ').slice(1).join(' ') || '',
+                      email: item.email || '',
+                      phone: item.phone || '',
+                      company_name: item.company_name || item.company || '',
+                      title: item.title || item.designation || '',
+                      location: item.location || item.city || '',
+                      industry: item.industry || 'Technology & SaaS',
+                      status: item.status || 'New',
+                    }));
+                  }
+                }
+              } else {
+                console.warn(`Gemini model ${targetModel} returned HTTP ${response.status}, attempting fallback model...`);
+              }
+            } catch (err) {
+              console.error(`Gemini model ${targetModel} fetch error:`, err);
             }
           }
         }
       } catch (err) {
-        console.error('Gemini API extraction failed, using structural parser fallback:', err);
+        console.error('Gemini API extraction exception:', err);
       }
     }
 
