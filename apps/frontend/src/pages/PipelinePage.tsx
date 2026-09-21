@@ -55,7 +55,6 @@ interface Lead {
   status: string;
   stage_id?: string;
   score: number;
-  estimated_value: number;
 }
 
 export const PipelinePage: React.FC = () => {
@@ -251,11 +250,6 @@ export const PipelinePage: React.FC = () => {
               return stage.position === 1;
             });
 
-            const totalValue = stageLeads.reduce(
-              (acc, l) => acc + (Number(l.estimated_value) || 0),
-              0
-            );
-
             return (
               <Paper
                 key={stage.id}
@@ -301,9 +295,6 @@ export const PipelinePage: React.FC = () => {
                       sx={{ height: 20, fontSize: '0.75rem', fontWeight: 700 }}
                     />
                   </Box>
-                  <Typography variant="caption" sx={{ fontWeight: 700, color: 'success.main', ml: 'auto' }}>
-                    ${totalValue.toLocaleString()}
-                  </Typography>
                 </Box>
 
                 {/* Column Lead Cards */}
@@ -352,14 +343,7 @@ export const PipelinePage: React.FC = () => {
 
                           <Divider sx={{ my: 1 }} />
 
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <MoneyIcon fontSize="small" color="success" />
-                              <Typography variant="caption" sx={{ fontWeight: 700, color: 'success.main' }}>
-                                ${Number(lead.estimated_value || 0).toLocaleString()}
-                              </Typography>
-                            </Box>
-
+                          <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                             <Chip
                               icon={<ScoreIcon style={{ fontSize: 12 }} />}
                               label={`${lead.score || 0}`}

@@ -35,7 +35,6 @@ interface LeadRecord {
   score?: number;
   lead_score?: number;
   status?: string;
-  estimated_value?: number;
 }
 
 const INITIAL_LEADS: LeadRecord[] = [];
@@ -170,16 +169,6 @@ export const LeadsPage: React.FC = () => {
           size="small"
           sx={{ fontWeight: 700, bgcolor: 'action.hover' }}
         />
-      ),
-    },
-    {
-      field: 'estimated_value',
-      headerName: 'Deal Value',
-      width: 120,
-      renderCell: (params) => (
-        <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main' }}>
-          ${Number(params.value || 0).toLocaleString()}
-        </Typography>
       ),
     },
     {

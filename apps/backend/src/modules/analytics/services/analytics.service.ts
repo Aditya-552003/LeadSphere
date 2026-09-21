@@ -28,8 +28,6 @@ export class AnalyticsService {
     const sourceMap: Record<string, number> = {};
 
     leads.forEach((l) => {
-      const val = Number(l.custom?.estimated_value || 0);
-      totalPipelineValue += val;
       const src = l.source || 'Website';
       sourceMap[src] = (sourceMap[src] || 0) + 1;
     });

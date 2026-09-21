@@ -17,13 +17,11 @@ import {
 interface LeadRecord {
   id: string;
   status?: string;
-  estimated_value?: number;
 }
 
 export const DashboardPage: React.FC = () => {
   const [leadsCount, setLeadsCount] = useState<number>(0);
   const [activeDealsCount, setActiveDealsCount] = useState<number>(0);
-  const [totalDealValue, setTotalDealValue] = useState<number>(0);
   const [tenantName, setTenantName] = useState<string>('Workspace');
   const [userName, setUserName] = useState<string>('User');
 
@@ -86,19 +84,6 @@ export const DashboardPage: React.FC = () => {
       (l) => !['Closed', 'Lost', 'Archived'].includes(l.status || '')
     );
     setActiveDealsCount(activeDeals.length);
-
-    const valSum = localLeads.reduce(
-      (sum, l) => sum + (Number(l.estimated_value) || 0),
-      0
-    );
-    setTotalDealValue(valSum);
-  };
-
-  const formatCurrency = (val: number) => {
-    if (val === 0) return '$0 estimated value';
-    if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M estimated value`;
-    if (val >= 1000) return `$${(val / 1000).toFixed(1)}k estimated value`;
-    return `$${val.toLocaleString()} estimated value`;
   };
 
   const stats = [
@@ -111,7 +96,7 @@ export const DashboardPage: React.FC = () => {
     {
       title: 'Active Pipeline Deals',
       value: activeDealsCount.toLocaleString(),
-      change: formatCurrency(totalDealValue),
+      change: `${activeDealsCount} active stage deals`,
       icon: <TrendingUpIcon color="secondary" />,
     },
     {

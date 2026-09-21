@@ -39,6 +39,13 @@ import {
   SwapHoriz as MapIcon,
 } from '@mui/icons-material';
 
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+}
+
 interface PdfImportDialogProps {
   open: boolean;
   onClose: () => void;
@@ -69,7 +76,6 @@ const LEAD_FIELDS = [
   { key: 'phone', label: 'Phone Number' },
   { key: 'company_name', label: 'Company Name' },
   { key: 'designation', label: 'Title / Designation' },
-  { key: 'estimated_value', label: 'Deal Value ($)' },
   { key: 'ignore', label: '— Ignore Column —' },
 ];
 
@@ -135,21 +141,111 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
     }
   };
 
-  const runFallbackClientDocling = (file: File) => {
-    setTimeout(() => {
-      const headers = ['Full Name', 'Email', 'Phone', 'Company Name', 'Designation', 'Estimated Value ($)'];
-      const rows = [
-        ['Arthur Pendelton', 'arthur.p@docling-parse.test', '+1 555 234 5678', 'Apex Solutions', 'Managing Director', '50000'],
-        ['Claire Danvers', 'claire.d@docling-parse.test', '+1 555 876 5432', 'Danvers Logistics', 'Head of Operations', '75000'],
-        ['Marcus Vance', 'marcus.v@docling-parse.test', '+1 555 456 7890', 'Vance Enterprise', 'Chief Technology Officer', '120000'],
-        ['Elena Rostova', 'elena.r@docling-parse.test', '+1 555 987 6543', 'Rostova Bio', 'VP of Procurement', '95000'],
-      ];
+  const detectAutoMapping = (headers: string[]): Record<string, string> => {
+    const HEADER_MAP: Record<string, string> = {
+      'first_name': 'first_name',
+      'firstname': 'first_name',
+      'fname': 'first_name',
+      'name': 'first_name',
+      'full_name': 'first_name',
+      'last_name': 'last_name',
+      'lastname': 'last_name',
+      'email': 'email',
+      'email_address': 'email',
+      'phone': 'phone',
+      'phone_number': 'phone',
+      'company': 'company_name',
+      'company_name': 'company_name',
+      'organization': 'company_name',
+      'title': 'designation',
+      'designation': 'designation',
+    };
+    const mapping: Record<string, string> = {};
+    headers.forEach((h) => {
+      const clean = h.trim().toLowerCase().replace(/[\s\-_]+/g, '_');
+      if (HEADER_MAP[clean]) {
+        mapping[h] = HEADER_MAP[clean];
+      } else {
+        mapping[h] = 'ignore';
+      }
+    });
+    return mapping;
+  };
+
+  const runFallbackClientDocling = async (file: File) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdfDoc = await loadingTask.promise;
+
+      const allLines: string[] = [];
+
+      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        
+        let lastY: number | null = null;
+        let lineText = '';
+
+        textContent.items.forEach((item: any) => {
+          const y = item.transform ? item.transform[5] : null;
+          if (lastY !== null && y !== null && Math.abs(y - lastY) > 4) {
+            if (lineText.trim()) allLines.push(lineText.trim());
+            lineText = '';
+          }
+          lineText += (lineText ? '  ' : '') + item.str;
+          if (y !== null) lastY = y;
+        });
+        if (lineText.trim()) allLines.push(lineText.trim());
+      }
+
+      let headers: string[] = [];
+      let rows: string[][] = [];
+
+      if (allLines.length > 0) {
+        const firstLine = allLines[0];
+        const delimiter = firstLine.includes('\t')
+          ? '\t'
+          : firstLine.includes(',')
+          ? ','
+          : firstLine.includes('|')
+          ? '|'
+          : null;
+
+        if (delimiter) {
+          headers = firstLine.split(delimiter).map((h) => h.trim().replace(/^"|"$/g, ''));
+          allLines.slice(1).forEach((line) => {
+            const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
+            if (cols.some((c) => c.length > 0)) rows.push(cols);
+          });
+        } else {
+          headers = allLines[0].split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
+          if (headers.length < 2) {
+            headers = ['Full Name', 'Email', 'Phone', 'Company Name', 'Designation'];
+            allLines.forEach((line) => {
+              const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
+              if (cols.length > 0) rows.push(cols);
+            });
+          } else {
+            allLines.slice(1).forEach((line) => {
+              const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
+              if (cols.length > 0) rows.push(cols);
+            });
+          }
+        }
+      }
+
+      if (headers.length === 0) {
+        headers = ['Field 1', 'Field 2', 'Field 3'];
+      }
+
+      const autoMap = detectAutoMapping(headers);
 
       const fallback: DoclingParseResult = {
         success: true,
-        engine: 'docling_js_fallback',
-        page_count: 1,
-        markdown: `Docling Document Layout & OCR Analysis for ${file.name}`,
+        engine: 'docling_pdfjs_extractor',
+        page_count: pdfDoc.numPages,
+        markdown: allLines.join('\n'),
         tables: [
           {
             table_index: 1,
@@ -158,22 +254,18 @@ export const PdfImportDialog: React.FC<PdfImportDialogProps> = ({
             row_count: rows.length,
           },
         ],
-        auto_mapping: {
-          'Full Name': 'first_name',
-          'Email': 'email',
-          'Phone': 'phone',
-          'Company Name': 'company_name',
-          'Designation': 'designation',
-          'Estimated Value ($)': 'estimated_value',
-        },
+        auto_mapping: autoMap,
         filename: file.name,
       };
 
       setDoclingResult(fallback);
-      setColumnMapping(fallback.auto_mapping);
+      setColumnMapping(autoMap);
       setParsing(false);
       setStep('preview');
-    }, 1200);
+    } catch (err) {
+      console.error('PDF.js client extraction failed:', err);
+      setParsing(false);
+    }
   };
 
   const handleCommitImport = async () => {

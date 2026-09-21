@@ -40,12 +40,11 @@ def parse_with_docling(pdf_path):
             "markdown": markdown_text,
             "tables": tables,
         }
-    except Exception as e:
+    except Exception:
         return None
 
 def fallback_pdf_extractor(pdf_path):
     raw_text = ""
-    # Attempt pypdf, pdfplumber, or basic string extraction
     try:
         import pypdf
         reader = pypdf.PdfReader(pdf_path)
@@ -56,40 +55,60 @@ def fallback_pdf_extractor(pdf_path):
     except Exception:
         try:
             with open(pdf_path, 'rb') as f:
-                content = f.read().decode('latin-1', errors='ignore')
-                # Basic string extraction from binary stream
-                strings = re.findall(r'\(([^()]{3,100})\)', content)
+                content = f.read().decode('utf-8', errors='ignore')
+                strings = re.findall(r'\(([^()]{2,200})\)', content)
                 raw_text = "\n".join(strings)
         except Exception as ex:
             raw_text = f"Error reading PDF content: {str(ex)}"
 
-    lines = [l.trim() if hasattr(l, 'trim') else l.strip() for l in raw_text.splitlines() if l.strip()]
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
     
-    # Parse lines into candidate tables or key-value rows
+    headers = []
     rows = []
-    headers = ["Name / Contact", "Email", "Phone", "Company", "Title / Role", "Deal Value ($)"]
-    
-    email_regex = re.compile(r'([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)')
-    phone_regex = re.compile(r'(\+?\d{1,3}[-.\s]?\(?\d{2,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4})')
-    
-    emails = email_regex.findall(raw_text)
-    phones = phone_regex.findall(raw_text)
 
-    if emails:
-        for idx, email in enumerate(set(emails)):
-            username = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
-            domain = email.split('@')[1].split('.')[0].title() + " Inc"
-            phone = phones[idx] if idx < len(phones) else f"+1 555 019 {1000 + idx}"
-            val = (idx + 1) * 25000
-            rows.append([
-                username,
-                email,
-                phone,
-                domain,
-                "VP of Procurement" if idx % 2 == 0 else "Director of IT",
-                str(val)
-            ])
-    
+    if lines:
+        # Check delimiter in first few lines
+        first_lines = lines[:10]
+        tab_count = sum(l.count('\t') for l in first_lines)
+        comma_count = sum(l.count(',') for l in first_lines)
+        pipe_count = sum(l.count('|') for l in first_lines)
+
+        delimiter = None
+        if tab_count > 3:
+            delimiter = '\t'
+        elif comma_count > 3:
+            delimiter = ','
+        elif pipe_count > 3:
+            delimiter = '|'
+
+        if delimiter:
+            split_headers = [c.strip().strip('"') for c in lines[0].split(delimiter)]
+            headers = [h for h in split_headers if h]
+            for line in lines[1:]:
+                row_cols = [c.strip().strip('"') for c in line.split(delimiter)]
+                if any(row_cols):
+                    rows.append(row_cols)
+        else:
+            # Multi-space delimiter parsing
+            headers_parts = re.split(r'\s{2,}', lines[0])
+            if len(headers_parts) > 1:
+                headers = [h.strip() for h in headers_parts if h.strip()]
+                for line in lines[1:]:
+                    parts = [p.strip() for p in re.split(r'\s{2,}', line) if p.strip()]
+                    if parts:
+                        rows.append(parts)
+            else:
+                # Default generic extraction from text lines
+                headers = ["Column 1", "Column 2", "Column 3", "Column 4"]
+                for line in lines:
+                    parts = [p.strip() for p in re.split(r'[\t,|]', line) if p.strip()]
+                    if not parts:
+                        parts = [line]
+                    rows.append(parts)
+
+    if not headers:
+        headers = ["Field 1", "Field 2", "Field 3"]
+
     tables = [{
         "table_index": 1,
         "headers": headers,

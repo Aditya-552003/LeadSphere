@@ -177,14 +177,6 @@ export const LeadDetailDialog: React.FC<LeadDetailDialogProps> = ({
                     />
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <MoneyIcon fontSize="small" color="success" /> Deal Value
-                    </Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main' }}>
-                      ${Number(lead.estimated_value || 0).toLocaleString()}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Typography variant="body2" color="text.secondary">Status</Typography>
                     <Chip label={lead.status || 'New'} size="small" variant="outlined" color="primary" />
                   </Box>

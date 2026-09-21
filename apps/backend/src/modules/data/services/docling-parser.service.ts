@@ -45,10 +45,6 @@ const HEADER_MAP: Record<string, string> = {
   'job_title': 'designation',
   'role': 'designation',
   'title_/_role': 'designation',
-  'estimated_value': 'estimated_value',
-  'deal_value': 'estimated_value',
-  'deal_value_($)': 'estimated_value',
-  'budget': 'estimated_value',
 };
 
 @Injectable()
@@ -109,38 +105,43 @@ export class DoclingParserService {
   }
 
   private fallbackDoclingParser(buffer: Buffer, filename: string): DoclingParseResult {
-    const text = buffer.toString('utf-8', 0, Math.min(buffer.length, 50000));
-    
-    const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi;
-    const phoneRegex = /(\+?\d{1,3}[-.\s]?\(?\d{2,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4})/g;
+    const text = buffer.toString('utf-8');
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
 
-    const emails = Array.from(new Set(text.match(emailRegex) || []));
-    const phones = Array.from(new Set(text.match(phoneRegex) || []));
+    let headers: string[] = [];
+    let rows: string[][] = [];
 
-    const headers = ['Full Name', 'Email', 'Phone', 'Company', 'Designation', 'Deal Value ($)'];
-    const rows: string[][] = [];
+    if (lines.length > 0) {
+      const firstLine = lines[0];
+      const delimiter = firstLine.includes('\t')
+        ? '\t'
+        : firstLine.includes(',')
+        ? ','
+        : firstLine.includes('|')
+        ? '|'
+        : null;
 
-    if (emails.length > 0) {
-      emails.forEach((email, idx) => {
-        const namePart = email.split('@')[0].replace(/[._-]/g, ' ');
-        const name = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-        const company = email.split('@')[1]?.split('.')[0].toUpperCase() + ' Corp';
-        const phone = phones[idx] || `+1 555 019 ${(1000 + idx).toString().slice(1)}`;
-        rows.push([
-          `${name} Lead`,
-          email,
-          phone,
-          company,
-          idx % 2 === 0 ? 'Director of Procurement' : 'VP of Engineering',
-          ((idx + 1) * 20000).toString(),
-        ]);
-      });
-    } else {
-      rows.push(
-        ['Arthur Pendelton', 'arthur.p@docling-parse.test', '+1 555 234 5678', 'Apex Solutions', 'Managing Director', '50000'],
-        ['Claire Danvers', 'claire.d@docling-parse.test', '+1 555 876 5432', 'Danvers Logistics', 'Head of Operations', '75000'],
-        ['Marcus Vance', 'marcus.v@docling-parse.test', '+1 555 456 7890', 'Vance Enterprise', 'Chief Technology Officer', '120000'],
-      );
+      if (delimiter) {
+        headers = firstLine.split(delimiter).map((h) => h.trim().replace(/^"|"$/g, ''));
+        lines.slice(1).forEach((line) => {
+          const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
+          if (cols.some((c) => c.length > 0)) {
+            rows.push(cols);
+          }
+        });
+      } else {
+        headers = ['Name', 'Email', 'Phone', 'Company', 'Designation', 'Estimated Value ($)'];
+        lines.forEach((line) => {
+          const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0);
+          if (cols.length > 0) {
+            rows.push(cols);
+          }
+        });
+      }
+    }
+
+    if (headers.length === 0) {
+      headers = ['Column 1', 'Column 2', 'Column 3'];
     }
 
     const tables: DoclingTable[] = [

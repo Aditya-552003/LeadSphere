@@ -50,15 +50,14 @@ const TARGET_FIELDS = [
   { label: 'Phone Number', value: 'phone' },
   { label: 'Company Name', value: 'company_name' },
   { label: 'Title / Designation', value: 'title' },
-  { label: 'Estimated Deal Value ($)', value: 'estimated_value' },
   { label: 'Status / Stage', value: 'status' },
   { label: 'Ignore Column', value: 'ignore' },
 ];
 
-const SAMPLE_CSV_DEFAULT = `First Name,Last Name,Company,Title,Email,Phone,Estimated Value
-Sarah,Jenkins,Acme Tech,VP of Sales,sarah@acmetech.test,+1 555 019 2831,45000
-Michael,Chen,Quantum Systems,CTO,michael@quantumsys.test,+1 555 042 9988,85000
-David,Miller,Vanguard Retail,Director of Procurement,david@vanguard.test,+1 555 077 1234,30000`;
+const SAMPLE_CSV_DEFAULT = `First Name,Last Name,Company,Title,Email,Phone
+Sarah,Jenkins,Acme Tech,VP of Sales,sarah@acmetech.test,+1 555 019 2831
+Michael,Chen,Quantum Systems,CTO,michael@quantumsys.test,+1 555 042 9988
+David,Miller,Vanguard Retail,Director of Procurement,david@vanguard.test,+1 555 077 1234`;
 
 export const ImportWizardDialog: React.FC<ImportWizardDialogProps> = ({
   open,

@@ -31,10 +31,6 @@ const HEADER_SYNONYMS: Record<string, string> = {
   'designation': 'designation',
   'job_title': 'designation',
   'position': 'designation',
-  'estimated_value': 'estimated_value',
-  'deal_value': 'estimated_value',
-  'budget': 'estimated_value',
-  'value': 'estimated_value',
 };
 
 @Injectable()
@@ -397,11 +393,10 @@ export class ImportExportService {
     });
     await this.exportJobRepository.save(exportJob);
 
-    const headers = ['ID', 'First Name', 'Last Name', 'Company', 'Designation', 'Email', 'Phone', 'Score', 'Estimated Value ($)', 'Created At'];
+    const headers = ['ID', 'First Name', 'Last Name', 'Company', 'Designation', 'Email', 'Phone', 'Score', 'Created At'];
     let csv = headers.join(',') + '\n';
 
     leads.forEach((l) => {
-      const estimatedVal = l.custom?.estimated_value || 0;
       const row = [
         l.id,
         this.sanitizeCsvCell(l.first_name),
@@ -411,7 +406,6 @@ export class ImportExportService {
         this.sanitizeCsvCell(l.email),
         this.sanitizeCsvCell(l.phone),
         l.lead_score,
-        estimatedVal,
         l.created_at ? new Date(l.created_at).toISOString() : '',
       ];
       csv += row.join(',') + '\n';

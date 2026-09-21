@@ -184,13 +184,12 @@ export const DataPipelinesPage: React.FC = () => {
                     <th>Contact Email</th>
                     <th>Phone</th>
                     <th>Status</th>
-                    <th>Deal Value</th>
                   </tr>
                 </thead>
                 <tbody>
                   ${
                     leads.length === 0
-                      ? '<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;">No lead records found in active workspace dataset.</td></tr>'
+                      ? '<tr><td colspan="6" style="text-align:center; padding:30px; color:#94a3b8;">No lead records found in active workspace dataset.</td></tr>'
                       : leads
                           .map(
                             (l, i) => `
@@ -201,7 +200,6 @@ export const DataPipelinesPage: React.FC = () => {
                           <td>${l.email || 'N/A'}</td>
                           <td>${l.phone || 'N/A'}</td>
                           <td>${l.status || 'New'}</td>
-                          <td class="amount">$${Number(l.estimated_value || 0).toLocaleString()}</td>
                         </tr>
                       `
                           )
