@@ -508,7 +508,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
             const page = await pdfDoc.getPage(pageNum);
             const textContent = await page.getTextContent();
 
-            // Group text items by Y coordinate (row in PDF)
+            // Group text items by Y coordinate with row tolerance (10px) to keep multi-line table cells together
             const lineMap: { [y: number]: { x: number; text: string }[] } = {};
             textContent.items.forEach((item: any) => {
               const str = (item.str || '').trim();
@@ -516,7 +516,7 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
               const y = Math.round(item.transform[5]); // Y coordinate
               const x = Math.round(item.transform[4]); // X coordinate
 
-              const lineKey = Object.keys(lineMap).find((k) => Math.abs(Number(k) - y) < 4);
+              const lineKey = Object.keys(lineMap).find((k) => Math.abs(Number(k) - y) < 10);
               const targetKey = lineKey ? Number(lineKey) : y;
               if (!lineMap[targetKey]) lineMap[targetKey] = [];
               lineMap[targetKey].push({ x, text: str });
@@ -533,39 +533,15 @@ export const BulkImportWizardDialog: React.FC<BulkImportWizardDialogProps> = ({
               const lineTokens = lineMap[y].map((item) => item.text);
               const lineStr = lineTokens.join('\t');
               rawText += lineStr + '\n';
-
-              const lineFull = lineTokens.join(' ');
-              const emailMatch = lineFull.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/i);
-              const phoneMatch = lineFull.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
-
-              if (emailMatch || phoneMatch) {
-                const email = emailMatch ? emailMatch[0] : '';
-                const phone = phoneMatch ? phoneMatch[0] : '';
-
-                // Filter out email and phone from text tokens
-                const cleanTokens = lineTokens.filter(
-                  (t) => t !== email && t !== phone && !/^\d+$/.test(t)
-                );
-
-                const name = cleanTokens[0] || 'Lead Contact';
-                const company = cleanTokens[1] || cleanTokens.slice(1).join(' ') || 'N/A';
-                const title = cleanTokens[2] || 'Executive';
-                const location = cleanTokens[3] || '';
-
-                extractedPdfRows.push([name, email, phone, company, title, location]);
-              }
             });
-          }
-
-          if (extractedPdfRows.length > 0) {
-            rows = extractedPdfRows;
           }
         } catch (pdfErr) {
           console.error('Client PDF raw text extraction failed:', pdfErr);
         }
 
-        // Call backend Gemini AI Lead Extraction
-        extractedLeads = await extractLeadsWithGeminiAPI('pdf', rawText, headers, rows, pdfBase64);
+        // Call backend Gemini AI Lead Extraction with base64 PDF and clean raw text
+        extractedLeads = await extractLeadsWithGeminiAPI('pdf', rawText, headers, [], pdfBase64);
+
       } else {
         // Excel / CSV file extraction via SheetJS & Gemini
         setFileType('excel');

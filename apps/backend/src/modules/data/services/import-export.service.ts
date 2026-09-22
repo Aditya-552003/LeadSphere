@@ -640,29 +640,32 @@ export class ImportExportService {
     status: string;
   }>> {
     const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
     let contentToAnalyze = rawContent || '';
-    if (!contentToAnalyze && headers && rows) {
+    if (!contentToAnalyze && headers && rows && rows.length > 0) {
       contentToAnalyze = `Headers: ${headers.join(', ')}\n` + rows.map((r) => r.join(', ')).join('\n');
     }
 
     if (apiKey) {
       try {
-        const promptText = `You are an expert Sales Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document/table and extract EVERY SINGLE row/contact record accurately into structured columns.
+        const promptText = `You are an expert Sales Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document/table and extract EVERY SINGLE row/contact record accurately into structured JSON objects.
 
-COLUMN RECOGNITION RULES:
-- "full_name": The contact person's actual name (e.g., "RAJ PRASAD MAURYA", "RAM BHAJAN KUSHWAHA", "SURJYA NARAYAN PATNAIK", "Kamal arora", "VINAY SINGH"). Do NOT put email address or company name here!
-- "email": The email address (e.g., "hchandra904@gmail.com", "rambhajan95@gmail.com", "ashutosh.mishra@gyandairy.com"). Combine split multi-line email text if needed.
-- "phone": The phone number (e.g., "+919307048700", "+919838107135", "8840354633"). Combine split digits.
-- "company_name": The company/firm name (e.g., "M/S RAJ MACHINERY CO.", "ENVIROZONE INSTRUMENTS PRIVATE LIMITED", "C P MILK AND FOOD PRODUCTS PVT LTD", "S K WOOLLEN INDUSTRIES", "SINGH ENTERPRISES").
-- "location": The city/location (e.g., "Prayagraj", "Deoria", "Gorakhpur", "Bhadohi", "Mirzapur").
-- "title": The designation or job title if available (e.g. "Executive", "Director").
-- "industry": The industry/business type (e.g. "Manufacturing of flasas Bricks").
+TABLE COLUMN LAYOUT RECOGNITION & MAPPING:
+The table in the PDF/Excel document contains contact columns. You must extract each row into these exact JSON fields:
+- "full_name": The contact person's actual full name (e.g. "RAJ PRASAD MAURYA", "RAM BHAJAN KUSHWAHA", "SURJYA NARAYAN PATNAIK", "Kamal arora", "VINAY SINGH"). NEVER put email prefixes, email addresses, or company names in full_name!
+- "email": The complete email address (e.g. "hchandra904@gmail.com", "rambhajan95@gmail.com", "ashutosh.mishra@gyandairy.com"). Combine split multi-line email text if needed.
+- "phone": The complete phone number (e.g. "+919307048700", "+919838107135", "8840354633"). Combine split digits.
+- "company_name": The organization/company name (e.g. "M/S RAJ MACHINERY CO.", "ENVIROZONE INSTRUMENTS PRIVATE LIMITED", "C P MILK AND FOOD PRODUCTS PVT LTD", "S K WOOLLEN INDUSTRIES", "SINGH ENTERPRISES").
+- "location": The city/location (e.g. "Prayagraj", "Deoria", "Gorakhpur", "Bhadohi", "Mirzapur").
+- "title": Job title or designation (e.g. "Executive", "Director", "Manager", "Owner"). Default to "Executive" if missing.
+- "industry": Business type or category if present.
 - "status": "New"
 
-CRITICAL STEP: Extract each row of the document as a separate JSON object in an array.
-Return ONLY valid JSON array without markdown formatting.`;
+CRITICAL INSTRUCTION:
+1. Extract EVERY contact row as an individual JSON object inside a single JSON array.
+2. Ensure columns are correctly mapped without shifting names into title or email prefixes into full_name.
+3. Output ONLY valid raw JSON array without markdown backticks or extra commentary.`;
 
         const parts: any[] = [{ text: promptText }];
 
@@ -671,7 +674,6 @@ Return ONLY valid JSON array without markdown formatting.`;
         }
 
         if (pdfBase64 && fileType === 'pdf') {
-          // Clean base64 string
           const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '').trim();
           if (cleanBase64.length > 0) {
             parts.push({
@@ -685,36 +687,45 @@ Return ONLY valid JSON array without markdown formatting.`;
 
         if (parts.length > 1) {
           const modelsToTry = Array.from(
-            new Set([model, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']),
+            new Set([primaryModel, 'gemini-3.6-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']),
           ).filter(Boolean) as string[];
 
           for (const targetModel of modelsToTry) {
-            try {
-              const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    contents: [{ parts }],
-                  }),
-                },
-              );
+            // Support exponential backoff retries for transient 503 / 429 errors
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const response = await fetch(
+                  `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      contents: [{ parts }],
+                    }),
+                  },
+                );
 
-              if (response.ok) {
-                const resData: any = await response.json();
-                const candidateText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (candidateText) {
-                  const extractedLeads = this.parseGeminiResponseText(candidateText);
-                  if (extractedLeads.length > 0) {
-                    return extractedLeads;
+                if (response.ok) {
+                  const resData: any = await response.json();
+                  const candidateText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (candidateText) {
+                    const extractedLeads = this.parseGeminiResponseText(candidateText);
+                    if (extractedLeads.length > 0) {
+                      return extractedLeads;
+                    }
                   }
+                } else if (response.status === 503 || response.status === 429) {
+                  console.warn(`Gemini model ${targetModel} returned HTTP ${response.status} (attempt ${attempt + 1}/3), waiting before retry...`);
+                  await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+                  continue;
+                } else {
+                  console.warn(`Gemini model ${targetModel} returned HTTP ${response.status}`);
+                  break;
                 }
-              } else {
-                console.warn(`Gemini model ${targetModel} returned HTTP ${response.status}, attempting fallback model...`);
+              } catch (err) {
+                console.error(`Gemini model ${targetModel} fetch error:`, err);
+                break;
               }
-            } catch (err) {
-              console.error(`Gemini model ${targetModel} fetch error:`, err);
             }
           }
         }
@@ -723,7 +734,7 @@ Return ONLY valid JSON array without markdown formatting.`;
       }
     }
 
-    // High-precision fallback when API key is unconfigured, Gemini returns 0 leads, or network call fails
+    // High-precision fallback parser when Gemini is offline or unconfigured
     return this.fallbackLeadExtraction(contentToAnalyze, headers, rows);
   }
 
@@ -740,7 +751,6 @@ Return ONLY valid JSON array without markdown formatting.`;
         if (arrayKey) rawItems = parsed[arrayKey];
       }
     } catch (e) {
-      // Regex search for JSON array [...]
       const arrayMatch = candidateText.match(/\[\s*\{[\s\S]*\}\s*\]/);
       if (arrayMatch) {
         try {
@@ -758,18 +768,27 @@ Return ONLY valid JSON array without markdown formatting.`;
       let company = item.company_name || item.company || item.organization || item.org || '';
       let title = item.title || item.designation || item.job_title || item.role || item.position || '';
       let location = item.location || item.city || item.address || '';
-      let industry = item.industry || item.sector || 'Technology & SaaS';
+      let industry = item.industry || item.sector || '';
       let status = item.status || 'New';
       let rawName = item.full_name || item.name || item.contact_name || `${item.first_name || ''} ${item.last_name || ''}`.trim();
 
-      // Fix column mismatch: If rawName looks like an email or email prefix, check if title holds the actual contact name!
-      if (rawName.includes('@') || /^[a-z0-9._-]+$/i.test(rawName.trim())) {
+      // Detect and fix column swapping (e.g. Email prefix in full_name, Person Name in title)
+      const isEmailPrefix = (str: string) => !str.includes(' ') && (str.includes('@') || /^[a-z0-9._-]+$/i.test(str.trim()));
+      const isPersonName = (str: string) => /^[A-Za-z\s]{3,}$/.test(str.trim()) && !/executive|manager|director|vp|ceo|lead/i.test(str);
+
+      if (isEmailPrefix(rawName)) {
         if (!email && rawName.includes('@')) {
           email = rawName.trim();
         }
-        if (title && /^[A-Za-z\s]{3,}$/.test(title.trim()) && !/executive|manager|director|vp|ceo|lead/i.test(title)) {
+        if (title && isPersonName(title)) {
           rawName = title.trim();
           title = 'Executive';
+        } else if (company && isPersonName(company)) {
+          rawName = company.trim();
+          company = '';
+        } else if (location && isPersonName(location)) {
+          rawName = location.trim();
+          location = '';
         }
       }
 
@@ -789,7 +808,6 @@ Return ONLY valid JSON array without markdown formatting.`;
         }
       }
 
-      // Clean leading index numbers like "1 ", "00 "
       rawName = rawName.replace(/^\d+\s+/, '').trim();
       const fullName = rawName || 'Lead Contact';
       const firstName = item.first_name || fullName.split(' ')[0] || 'Lead';
@@ -802,7 +820,7 @@ Return ONLY valid JSON array without markdown formatting.`;
         email,
         phone,
         company_name: company,
-        title,
+        title: title || 'Executive',
         location,
         industry,
         status,
@@ -813,7 +831,13 @@ Return ONLY valid JSON array without markdown formatting.`;
   private fallbackLeadExtraction(contentToAnalyze: string, headers?: string[], rows?: any[][]): any[] {
     const extracted: any[] = [];
 
-    if (rows && rows.length > 0 && headers && headers.length > 0) {
+    // Check if rows are valid (non-corrupt)
+    const isCorruptRows = rows && rows.some((r) => {
+      const col0 = String(r[0] || '').trim();
+      return col0.includes('@') || /^[a-z0-9._-]+$/i.test(col0);
+    });
+
+    if (rows && rows.length > 0 && headers && headers.length > 0 && !isCorruptRows) {
       const mapping = this.autoDetectMapping(headers);
       rows.forEach((r) => {
         const item: any = {
@@ -823,9 +847,9 @@ Return ONLY valid JSON array without markdown formatting.`;
           email: '',
           phone: '',
           company_name: '',
-          title: '',
+          title: 'Executive',
           location: '',
-          industry: 'Technology & SaaS',
+          industry: '',
           status: 'New',
         };
         headers.forEach((h, idx) => {
@@ -848,28 +872,45 @@ Return ONLY valid JSON array without markdown formatting.`;
     } else if (contentToAnalyze) {
       const lines = contentToAnalyze.split(/\r?\n/).filter((l) => l.trim());
       lines.forEach((line, idx) => {
-        const emailMatch = line.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
+        const emailMatch = line.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/i);
         const phoneMatch = line.match(/(\+?\d{10,13}|\+?\d{2,4}[-.\s]?\d{3,5}[-.\s]?\d{4,5})/);
-        if (emailMatch || phoneMatch || idx < 50) {
+        if (emailMatch || phoneMatch) {
           const email = emailMatch ? emailMatch[0] : '';
           const phone = phoneMatch ? phoneMatch[0] : '';
-          const cleanLine = line.replace(email, '').replace(phone, '').trim();
-          const parts = cleanLine.split(/,|\t|\|/).map((s) => s.trim()).filter(Boolean);
-          const name = parts[0] || `Lead Contact ${idx + 1}`;
-          if (name.length > 1 && !name.toLowerCase().includes('page')) {
-            extracted.push({
-              full_name: name,
-              first_name: name.split(' ')[0] || 'Lead',
-              last_name: name.split(' ').slice(1).join(' ') || '',
-              email,
-              phone,
-              company_name: parts[1] || 'Acme Corp',
-              title: parts[2] || 'Executive',
-              location: parts[3] || 'New York, NY',
-              industry: 'Technology & SaaS',
-              status: 'New',
-            });
-          }
+
+          let cleanLine = line.replace(email, '').replace(phone, '').replace(/^\d+\s*/, '').trim();
+          const tokens = cleanLine.split(/,|\t|\|/).map((s) => s.trim()).filter(Boolean);
+
+          let name = '';
+          let company = '';
+          let location = '';
+          let title = 'Executive';
+
+          tokens.forEach((tok) => {
+            if (/CO\.|LIMITED|PVT|LTD|INDUSTRIES|ENTERPRISES|INC|CORP/i.test(tok)) {
+              company = tok;
+            } else if (/^[A-Za-z\s]{3,}$/.test(tok) && !name) {
+              name = tok;
+            } else if (!location) {
+              location = tok;
+            }
+          });
+
+          if (!name) name = tokens[0] || `Lead Contact ${idx + 1}`;
+          if (!company) company = tokens[1] || '';
+
+          extracted.push({
+            full_name: name,
+            first_name: name.split(' ')[0] || 'Lead',
+            last_name: name.split(' ').slice(1).join(' ') || '',
+            email,
+            phone,
+            company_name: company,
+            title,
+            location,
+            industry: '',
+            status: 'New',
+          });
         }
       });
     }
@@ -877,3 +918,4 @@ Return ONLY valid JSON array without markdown formatting.`;
     return extracted;
   }
 }
+
