@@ -649,19 +649,20 @@ export class ImportExportService {
 
     if (apiKey) {
       try {
-        const promptText = `You are an expert Sales Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document content/file and extract ALL individual contact/lead records.
-CRITICAL FORMAT INSTRUCTIONS:
-- Each contact/person MUST be a SEPARATE object in the JSON array. Do NOT combine multiple contacts or lines into one object.
-- "full_name": Only the person's name (e.g., "Raj Prasad Maurya"). Do NOT include email address, phone, or company in full_name.
-- "email": Contact's email address (e.g., "hchandra904@gmail.com").
-- "phone": Contact's phone number (e.g., "+919838107135").
-- "company_name": Company or organization name (e.g., "M/S RAJ MACHINERY CO.").
-- "title": Job title or designation.
-- "location": City, state, or country (e.g., "Prayagraj").
-- "industry": Industry sector.
-- "status": Default to "New".
+        const promptText = `You are an expert Sales Lead Extraction AI. Analyze the uploaded ${fileType.toUpperCase()} document/table and extract EVERY SINGLE row/contact record accurately into structured columns.
 
-Return ONLY a valid JSON array of objects without markdown fences or explanations.`;
+COLUMN RECOGNITION RULES:
+- "full_name": The contact person's actual name (e.g., "RAJ PRASAD MAURYA", "RAM BHAJAN KUSHWAHA", "SURJYA NARAYAN PATNAIK", "Kamal arora", "VINAY SINGH"). Do NOT put email address or company name here!
+- "email": The email address (e.g., "hchandra904@gmail.com", "rambhajan95@gmail.com", "ashutosh.mishra@gyandairy.com"). Combine split multi-line email text if needed.
+- "phone": The phone number (e.g., "+919307048700", "+919838107135", "8840354633"). Combine split digits.
+- "company_name": The company/firm name (e.g., "M/S RAJ MACHINERY CO.", "ENVIROZONE INSTRUMENTS PRIVATE LIMITED", "C P MILK AND FOOD PRODUCTS PVT LTD", "S K WOOLLEN INDUSTRIES", "SINGH ENTERPRISES").
+- "location": The city/location (e.g., "Prayagraj", "Deoria", "Gorakhpur", "Bhadohi", "Mirzapur").
+- "title": The designation or job title if available (e.g. "Executive", "Director").
+- "industry": The industry/business type (e.g. "Manufacturing of flasas Bricks").
+- "status": "New"
+
+CRITICAL STEP: Extract each row of the document as a separate JSON object in an array.
+Return ONLY valid JSON array without markdown formatting.`;
 
         const parts: any[] = [{ text: promptText }];
 
@@ -754,7 +755,23 @@ Return ONLY a valid JSON array of objects without markdown fences or explanation
     return rawItems.map((item) => {
       let email = item.email || item.email_address || item.mail || '';
       let phone = item.phone || item.phone_number || item.mobile || item.contact || '';
+      let company = item.company_name || item.company || item.organization || item.org || '';
+      let title = item.title || item.designation || item.job_title || item.role || item.position || '';
+      let location = item.location || item.city || item.address || '';
+      let industry = item.industry || item.sector || 'Technology & SaaS';
+      let status = item.status || 'New';
       let rawName = item.full_name || item.name || item.contact_name || `${item.first_name || ''} ${item.last_name || ''}`.trim();
+
+      // Fix column mismatch: If rawName looks like an email or email prefix, check if title holds the actual contact name!
+      if (rawName.includes('@') || /^[a-z0-9._-]+$/i.test(rawName.trim())) {
+        if (!email && rawName.includes('@')) {
+          email = rawName.trim();
+        }
+        if (title && /^[A-Za-z\s]{3,}$/.test(title.trim()) && !/executive|manager|director|vp|ceo|lead/i.test(title)) {
+          rawName = title.trim();
+          title = 'Executive';
+        }
+      }
 
       if (!email && rawName) {
         const foundEmail = rawName.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
@@ -777,11 +794,6 @@ Return ONLY a valid JSON array of objects without markdown fences or explanation
       const fullName = rawName || 'Lead Contact';
       const firstName = item.first_name || fullName.split(' ')[0] || 'Lead';
       const lastName = item.last_name || fullName.split(' ').slice(1).join(' ') || '';
-      const company = item.company_name || item.company || item.organization || item.org || '';
-      const title = item.title || item.designation || item.job_title || item.role || item.position || '';
-      const location = item.location || item.city || item.address || '';
-      const industry = item.industry || item.sector || 'Technology & SaaS';
-      const status = item.status || 'New';
 
       return {
         full_name: fullName,
